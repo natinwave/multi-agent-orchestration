@@ -199,9 +199,25 @@ environment block, and never in `docker inspect`. `claude-code` and
 identity.
 
 **`/run` is tmpfs, so this is deliberately lost on reboot.** After the
-machine restarts, re-run bootstrap under `op run` to put the credentials
-back; jobs will fail with a clear "no credential at /run/secrets" until you
-do. That is the intended trade: credentials never touch a disk.
+machine restarts, re-run bootstrap to put the credentials back; jobs fail
+with a clear "no Claude credential in /run/secrets" until you do. That is
+the intended trade: credentials never touch a disk.
+
+The *directory* should not need recreating by hand each time, though.
+Install the tmpfiles rule once and systemd recreates it with the right
+owner and mode before anything else runs, so bootstrap never needs root
+again:
+
+```sh
+sed "s/%USER%/$(id -un)/g" systemd/orchestration.conf.template \
+  | sudo tee /etc/tmpfiles.d/orchestration.conf >/dev/null
+sudo systemd-tmpfiles --create
+```
+
+Without it, a directory left behind by an earlier run as `root` makes every
+credential write fail one confusing layer later. bootstrap now repairs what
+it can — a directory it owns with the wrong mode — and prints both the
+one-off `chown` and the permanent fix for anything it cannot.
 
 For a machine you are not sitting at, use a 1Password **service account**
 rather than `op signin` — the interactive sign-in expects the desktop app.

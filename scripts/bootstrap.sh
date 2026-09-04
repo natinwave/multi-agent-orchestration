@@ -123,6 +123,34 @@ if [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
   done
 fi
 
+# Make one directory exist, be owned by us, and be writable -- repairing it
+# where we can. mkdir -p alone is not enough: it succeeds silently on a
+# directory that already exists but belongs to root, and then every write
+# into it fails one confusing layer later.
+ensure_dir() {
+  local dir="$1"
+  mkdir -p "$dir" 2>/dev/null || sudo -n mkdir -p "$dir" 2>/dev/null || return 1
+  # A foreign owner is the only case that actually needs root. If it is
+  # ours already, a bad mode is ours to fix, so do not reach for sudo.
+  if [ ! -O "$dir" ]; then
+    sudo -n chown "$(id -u):$(id -g)" "$dir" 2>/dev/null || return 1
+  fi
+  chmod 0700 "$dir" 2>/dev/null || true
+  [ -w "$dir" ]
+}
+
+# Printed when we could not repair ownership ourselves. /run is tmpfs, so
+# the sudo fix would be needed again after every reboot -- the tmpfiles
+# rule is the one that actually ends it.
+secrets_permission_help() {
+  info "fix now:      sudo chown -R $(id -u):$(id -g) ${ORCH_SECRETS}"
+  info "fix for good: /run is tmpfs and is wiped every boot, so install the"
+  info "              systemd rule instead of repeating the chown:"
+  info "  sed \"s/%USER%/\$(id -un)/g\" systemd/orchestration.conf.template \\"
+  info "    | sudo tee /etc/tmpfiles.d/orchestration.conf >/dev/null"
+  info "  sudo systemd-tmpfiles --create"
+}
+
 secrets_step() {
   if [ ! -d "$ORCH_SECRETS" ]; then
     mkdir -p "$ORCH_SECRETS" 2>/dev/null \
@@ -134,17 +162,30 @@ secrets_step() {
       }
     sudo -n chown "$(id -u):$(id -g)" "$ORCH_SECRETS" 2>/dev/null
   fi
-  chmod 0700 "$ORCH_SECRETS" 2>/dev/null
+  if ! ensure_dir "$ORCH_SECRETS"; then
+    fail "${ORCH_SECRETS} is not writable by $(id -un)"
+    secrets_permission_help
+    return
+  fi
 
   # Written only if the value is actually present, so a re-run without
   # `op run` leaves an existing credential alone rather than truncating it.
   write_secret() {
     local agent="$1" name="$2" value="$3"
     [ -n "$value" ] || return 1
-    mkdir -p "${ORCH_SECRETS}/${agent}" && chmod 0700 "${ORCH_SECRETS}/${agent}"
-    local dest="${ORCH_SECRETS}/${agent}/${name}"
-    ( umask 077; printf '%s' "$value" > "${dest}.tmp" ) && mv "${dest}.tmp" "$dest"
-    chmod 0400 "$dest"
+    local dir="${ORCH_SECRETS}/${agent}"
+    if ! ensure_dir "$dir"; then
+      SECRET_DIR_UNWRITABLE="$dir"
+      return 1
+    fi
+    local dest="${dir}/${name}"
+    ( umask 077; printf '%s' "$value" > "${dest}.tmp" ) 2>/dev/null \
+      && mv "${dest}.tmp" "$dest" \
+      && chmod 0400 "$dest" \
+      && return 0
+    rm -f "${dest}.tmp" 2>/dev/null
+    SECRET_DIR_UNWRITABLE="$dir"
+    return 1
   }
 
   # With a service account token present we can resolve the references in
@@ -199,7 +240,14 @@ secrets_step() {
     kept=$((kept + 1))
   fi
 
-  if [ -r "${ORCH_SECRETS}/claude-code/oauth_token" ] \
+  if [ -n "${SECRET_DIR_UNWRITABLE:-}" ]; then
+    # Distinguish "you have no credential" from "we could not write the
+    # credential we already resolved" -- they look identical downstream and
+    # have completely different fixes.
+    fail "resolved the credentials but could not write them: ${SECRET_DIR_UNWRITABLE} is not writable"
+    info "owned by $(stat -c '%U:%G' "$SECRET_DIR_UNWRITABLE" 2>/dev/null || echo 'someone else'), you are $(id -un)"
+    secrets_permission_help
+  elif [ -r "${ORCH_SECRETS}/claude-code/oauth_token" ] \
      || [ -r "${ORCH_SECRETS}/claude-code/anthropic_api_key" ]; then
     pass "secrets in place (${written} written, ${kept} already present)"
   else

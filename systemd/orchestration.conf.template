@@ -1,0 +1,18 @@
+# systemd-tmpfiles rule for the orchestration secrets directory.
+#
+# /run is a tmpfs: it is emptied on every boot. Without this, the directory
+# has to be recreated by hand with sudo after each restart before bootstrap
+# can put credentials back. With it, systemd recreates it -- correct owner,
+# correct mode -- before anything else runs, and bootstrap never needs root
+# again.
+#
+# Install once, replacing the placeholder with the user that runs the
+# supervisor:
+#
+#   sed "s/%USER%/$(id -un)/g" systemd/orchestration.conf.template \
+#     | sudo tee /etc/tmpfiles.d/orchestration.conf >/dev/null
+#   sudo systemd-tmpfiles --create
+#
+# Type Path                          Mode User   Group  Age
+d       /run/orchestration            0755 %USER% %USER% -
+d       /run/orchestration/secrets    0700 %USER% %USER% -
