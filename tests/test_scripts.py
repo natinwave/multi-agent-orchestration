@@ -23,12 +23,14 @@ def code_lines(text: str) -> list[str]:
     return [ln for ln in text.splitlines() if ln.strip() and not ln.strip().startswith("#")]
 
 
-@pytest.mark.parametrize("name", ["preflight.sh", "bootstrap.sh", "lib/common.sh"])
+@pytest.mark.parametrize(
+    "name", ["preflight.sh", "bootstrap.sh", "root-setup.sh", "lib/common.sh"]
+)
 def test_scripts_are_syntactically_valid(name: str) -> None:
     assert subprocess.run(["bash", "-n", str(SCRIPTS / name)]).returncode == 0
 
 
-@pytest.mark.parametrize("name", ["preflight.sh", "bootstrap.sh"])
+@pytest.mark.parametrize("name", ["preflight.sh", "bootstrap.sh", "root-setup.sh"])
 def test_scripts_are_executable(name: str) -> None:
     assert (SCRIPTS / name).stat().st_mode & 0o111
 
@@ -170,3 +172,41 @@ def test_secrets_are_written_with_restrictive_permissions() -> None:
     assert "umask 077" in BOOTSTRAP
     assert "chmod 0400" in BOOTSTRAP
     assert "chmod 0700" in BOOTSTRAP
+
+
+# --- the one script that needs root ---------------------------------------
+
+ROOT_SETUP = (SCRIPTS / "root-setup.sh").read_text()
+
+
+def test_root_setup_refuses_to_run_unprivileged() -> None:
+    result = subprocess.run(
+        ["bash", str(SCRIPTS / "root-setup.sh")], capture_output=True, text=True
+    )
+    assert result.returncode != 0
+    assert "must run as root" in result.stdout
+
+
+def test_root_setup_refuses_dangerous_paths() -> None:
+    """It runs chown -R as root, so the paths it accepts are worth pinning
+    even though they come from our own defaults."""
+    for guarded in ("/usr", "/etc", "/home", "/root"):
+        assert guarded in ROOT_SETUP
+
+
+def test_root_setup_will_not_grant_docker_group_silently() -> None:
+    """Membership of the docker group is root-equivalent on this machine,
+    so it must be asked for, never a side effect of running setup."""
+    assert "--add-docker-group" in ROOT_SETUP
+    usermod = [ln for ln in ROOT_SETUP.splitlines() if "usermod" in ln and not ln.strip().startswith("#")]
+    assert usermod, "expected a usermod call"
+    assert "ADD_DOCKER_GROUP" in ROOT_SETUP
+
+
+def test_root_setup_is_the_only_script_that_needs_root() -> None:
+    """Everything else runs as the ordinary user; if that stops being true
+    the README's trust story is wrong."""
+    for path in SCRIPTS.glob("*.sh"):
+        if path.name == "root-setup.sh":
+            continue
+        assert "must run as root" not in path.read_text(), path

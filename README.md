@@ -204,20 +204,14 @@ with a clear "no Claude credential in /run/secrets" until you do. That is
 the intended trade: credentials never touch a disk.
 
 The *directory* should not need recreating by hand each time, though.
-Install the tmpfiles rule once and systemd recreates it with the right
-owner and mode before anything else runs, so bootstrap never needs root
-again:
-
-```sh
-sed "s/%USER%/$(id -un)/g" systemd/orchestration.conf.template \
-  | sudo tee /etc/tmpfiles.d/orchestration.conf >/dev/null
-sudo systemd-tmpfiles --create
-```
+`sudo ./scripts/root-setup.sh` installs a `systemd-tmpfiles` rule so
+systemd recreates it with the right owner and mode before anything else
+runs, and bootstrap never needs root again.
 
 Without it, a directory left behind by an earlier run as `root` makes every
-credential write fail one confusing layer later. bootstrap now repairs what
-it can — a directory it owns with the wrong mode — and prints both the
-one-off `chown` and the permanent fix for anything it cannot.
+credential write fail one confusing layer later. bootstrap repairs what it
+can — a directory it owns with the wrong mode is its own to `chmod` — and
+points at `root-setup.sh` for anything needing a change of owner.
 
 For a machine you are not sitting at, use a 1Password **service account**
 rather than `op signin` — the interactive sign-in expects the desktop app.
@@ -318,7 +312,8 @@ which is usually the UID we want — the Dockerfile removes it first.
 
 ## Getting started
 
-On the Ubuntu host:
+On the Ubuntu host. Exactly one step needs root, and it is one reviewable
+script rather than a handful of commands pasted from here:
 
 ```sh
 git clone https://github.com/natinwave/multi-agent-orchestration.git
@@ -326,6 +321,8 @@ cd multi-agent-orchestration
 cp -f .env.example .env                 # references only; .env is gitignored
 
 ./scripts/preflight.sh                  # changes nothing; relay the output
+
+sudo ./scripts/root-setup.sh            # once per machine, the only root step
 
 ./scripts/bootstrap.sh --selftest       # finds ~/.op-token by itself
 
@@ -440,7 +437,7 @@ about any of it:
 What *is* covered off-host, and is worth running before you push:
 
 ```sh
-.venv/bin/python -m pytest -q          # 327 tests
+.venv/bin/python -m pytest -q          # 333 tests
 ./scripts/check-no-secrets.sh
 docker compose -f docker/docker-compose.yml config     # schema only
 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \

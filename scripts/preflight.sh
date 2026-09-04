@@ -271,13 +271,14 @@ if [ -d "$ORCH_ROOT" ]; then
     pass "runtime root ${ORCH_ROOT} exists and is writable"
   else
     fail "runtime root ${ORCH_ROOT} exists but is not writable by $(id -un)"
+    info "run once: sudo ./scripts/root-setup.sh"
   fi
 else
   parent="$(dirname "$ORCH_ROOT")"
   if [ -w "$parent" ] || [ "$(id -u)" = 0 ]; then
     info "runtime root ${ORCH_ROOT} does not exist yet -- bootstrap.sh will create it"
   else
-    warn "runtime root ${ORCH_ROOT} missing and ${parent} is not writable -- bootstrap needs sudo"
+    warn "runtime root ${ORCH_ROOT} missing -- run once: sudo ./scripts/root-setup.sh"
   fi
 fi
 

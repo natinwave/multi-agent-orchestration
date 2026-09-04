@@ -74,9 +74,7 @@ elif sudo -n mkdir -p "$ORCH_ROOT"/{jobs,worktrees,scratch,repos,logs} 2>/dev/nu
   sudo -n chown -R "$(id -u):$(id -g)" "$ORCH_ROOT" 2>/dev/null
 else
   fail "cannot create ${ORCH_ROOT} without sudo"
-  info "run these two lines once, then re-run this script:"
-  info "  sudo mkdir -p ${ORCH_ROOT} ${ORCH_SECRETS}"
-  info "  sudo chown -R $(id -u):$(id -g) ${ORCH_ROOT} ${ORCH_SECRETS}"
+  info "run once: sudo ./scripts/root-setup.sh"
 fi
 
 if [ -w "$ORCH_ROOT" ]; then
@@ -143,12 +141,9 @@ ensure_dir() {
 # the sudo fix would be needed again after every reboot -- the tmpfiles
 # rule is the one that actually ends it.
 secrets_permission_help() {
-  info "fix now:      sudo chown -R $(id -u):$(id -g) ${ORCH_SECRETS}"
-  info "fix for good: /run is tmpfs and is wiped every boot, so install the"
-  info "              systemd rule instead of repeating the chown:"
-  info "  sed \"s/%USER%/\$(id -un)/g\" systemd/orchestration.conf.template \\"
-  info "    | sudo tee /etc/tmpfiles.d/orchestration.conf >/dev/null"
-  info "  sudo systemd-tmpfiles --create"
+  info "run: sudo ./scripts/root-setup.sh"
+  info "that repairs the ownership and installs a systemd rule so /run/orchestration"
+  info "comes back correctly after a reboot -- it is the only root step there is."
 }
 
 secrets_step() {
