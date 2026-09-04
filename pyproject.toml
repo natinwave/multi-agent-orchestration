@@ -1,0 +1,29 @@
+[project]
+name = "orchestrator"
+version = "0.1.0"
+description = "Host-side supervisor for containerised coding agents"
+requires-python = ">=3.12"
+# The core supervisor is deliberately stdlib-only: tomllib, subprocess, json,
+# re. Ubuntu 24.04 ships Python 3.12, so bootstrap installs nothing to run it.
+dependencies = []
+
+[project.optional-dependencies]
+# Only mcp_server.py needs this. Pinned to 2.x: the SDK renamed FastMCP to
+# MCPServer at 2.0 and mcp_server.py is written against the new API.
+mcp = ["mcp>=2.0,<3"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+orchestrate = "orchestrator.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"

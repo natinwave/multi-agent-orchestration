@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# stdio MCP server. This is the command an MCP client is configured to spawn;
+# it must print nothing to stdout except the protocol, so keep this quiet.
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+python="${here}/.venv/bin/python"
+[ -x "$python" ] || python="$(command -v python3)"
+PYTHONPATH="${here}/src${PYTHONPATH:+:$PYTHONPATH}" exec "$python" -m orchestrator.mcp_server "$@"

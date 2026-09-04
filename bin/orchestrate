@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+# Thin wrapper so the CLI works straight from a clone, with no install step
+# and no activated virtualenv -- the relay agent just runs ./bin/orchestrate.
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+python="${here}/.venv/bin/python"
+[ -x "$python" ] || python="$(command -v python3)"
+PYTHONPATH="${here}/src${PYTHONPATH:+:$PYTHONPATH}" exec "$python" -m orchestrator.cli "$@"

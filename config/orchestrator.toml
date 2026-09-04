@@ -1,0 +1,36 @@
+# Runtime paths and the knobs that shape what check() returns.
+
+[paths]
+# Bind-mounted into containers at this SAME path, because a git worktree
+# stores an absolute path back to the main clone's .git and Ubuntu 24.04
+# ships git 2.43 -- too old for `worktree --relative-paths` (2.48+).
+# Changing this means changing docker-compose.yml to match.
+root = "/srv/orchestration"
+
+[check]
+# Narration lines returned by default. This lands in a voice model's
+# context, so it is small on purpose.
+default_narration_lines = 3
+max_narration_lines = 20
+# Raw log lines are opt-in: only ever returned when tail=N is passed.
+max_tail_lines = 200
+
+[redaction]
+# Bits of Shannon entropy per character above which an unrecognised opaque
+# run is treated as a credential. Lower is safer and noisier.
+entropy_threshold = 3.6
+entropy_fallback = true
+# Environment variables whose values are scrubbed from all output, on top of
+# whatever is found in the per-agent secrets directories.
+scrub_env = [
+  "CLAUDE_CODE_OAUTH_TOKEN",
+  "ANTHROPIC_API_KEY",
+  "GH_TOKEN",
+  "GITHUB_TOKEN",
+  "HERMES_API_KEY",
+  "OP_SERVICE_ACCOUNT_TOKEN",
+]
+
+[jobs]
+# Jobs older than this are eligible for reaping, which frees their name.
+retain_days = 14

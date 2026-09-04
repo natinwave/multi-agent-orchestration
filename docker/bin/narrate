@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Report one milestone to the supervisor.
+#
+# This is the ONLY channel to the voice front-end. Nobody reads stdout: the
+# raw log exists, but check() does not return it unless asked, so anything
+# not narrated is invisible to the person waiting.
+#
+#   narrate "tests green, opening a PR"
+#   narrate --state blocked "cannot reach the package registry"
+#   narrate --state awaiting_input "which staging database?"
+#
+# States an agent may set: running, blocked, awaiting_input. done and failed
+# come from the process exit code -- an agent does not get to grade itself.
+set -euo pipefail
+
+state="-"
+case "${1:-}" in
+  --state)
+    state="${2:?--state needs a value}"
+    case "$state" in
+      running|blocked|awaiting_input) ;;
+      *)
+        echo "narrate: '$state' is not settable by an agent" \
+             "(use running, blocked or awaiting_input)" >&2
+        exit 2
+        ;;
+    esac
+    shift 2
+    ;;
+  --help|-h)
+    sed -n '2,14p' "$0" | sed 's/^# \{0,1\}//'
+    exit 0
+    ;;
+esac
+
+if [ "$#" -eq 0 ]; then
+  echo "narrate: nothing to say" >&2
+  exit 2
+fi
+
+: "${ORCH_JOB_DIR:?narrate: ORCH_JOB_DIR is not set; this is not a supervised job}"
+
+# One line, tabs and newlines collapsed, capped at 200 characters. The cap
+# is what keeps a single write below PIPE_BUF, so concurrent appends from
+# several processes cannot interleave halfway through a record.
+text="$(printf '%s ' "$@" | tr '\t\n' '  ' | tr -s ' ' | sed 's/ *$//' | cut -c1-200)"
+
+printf '%s\t%s\t%s\n' "$(date -u +%Y-%m-%dT%H:%M:%S+00:00)" "$state" "$text" \
+  >> "${ORCH_JOB_DIR}/narration.log"

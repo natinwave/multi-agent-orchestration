@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "includeCoAuthoredBy": false,
+  "cleanupPeriodDays": 30,
+  "env": {
+    "CI": "1",
+    "DISABLE_AUTOUPDATER": "1",
+    "DISABLE_TELEMETRY": "1",
+    "DISABLE_ERROR_REPORTING": "1"
+  },
+  "permissions": {
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(/run/secrets/**)",
+      "Bash(cat /run/secrets/*)",
+      "Bash(env)",
+      "Bash(printenv)",
+      "Bash(docker:*)"
+    ]
+  }
+}

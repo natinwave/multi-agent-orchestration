@@ -1,0 +1,91 @@
+# Agent containers. Two invariants, both load-bearing:
+#
+#   1. NO /var/run/docker.sock. That socket is host root: an agent holding it
+#      could read every other agent's credentials and start privileged
+#      containers, which would make the per-agent secret scoping below
+#      decorative. The supervisor runs on the host and is the only thing
+#      that talks to the daemon.
+#   2. NO SECRET VALUES, here or in any env_file. Credentials arrive as
+#      files on a tmpfs the host fills from 1Password, mounted read-only,
+#      one directory per agent identity.
+
+name: orchestration
+
+x-agent-base: &agent-base
+  restart: unless-stopped
+  init: true
+  # Nothing here needs to gain privileges, and an agent runs model-authored
+  # commands by design, so the container is locked down as far as a working
+  # Claude Code install allows.
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  tmpfs:
+    - /tmp:size=2g,mode=1777
+  logging:
+    driver: json-file
+    options:
+      max-size: "50m"
+      max-file: "3"
+
+services:
+  claude-code:
+    <<: *agent-base
+    container_name: orch-claude-code
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Must match the host user owning ORCH_ROOT. On native Linux a bind
+        # mount passes UIDs through unchanged, so a mismatch leaves every
+        # file the agent writes unreadable to you. bootstrap.sh sets these
+        # from `id -u` / `id -g`.
+        AGENT_UID: ${AGENT_UID:-1000}
+        AGENT_GID: ${AGENT_GID:-1000}
+    image: orchestration/claude-code:${IMAGE_TAG:-latest}
+
+    volumes:
+      # The identical-path bind. A git worktree stores an absolute path back
+      # to the main clone's .git, and git 2.43 (Ubuntu 24.04) has no
+      # --relative-paths. Host path and container path must be the same
+      # string or worktrees will not resolve inside the container.
+      - ${ORCH_ROOT:-/srv/orchestration}:${ORCH_ROOT:-/srv/orchestration}
+
+      # A second view of the same worktrees, for ergonomics. Double-mounting
+      # one host directory at two container paths is fine; the bind above is
+      # the one that has to be there.
+      - ${ORCH_ROOT:-/srv/orchestration}/worktrees:/workspace
+
+      # This agent's credentials and ONLY this agent's: separate directories
+      # per identity, so claude-code cannot read hermes's token. Read-only,
+      # and on the host it is a tmpfs, so the values never touch a disk.
+      - ${ORCH_SECRETS:-/run/orchestration/secrets}/claude-code:/run/secrets:ro
+
+      # ~/.claude state survives a container recreation. Seeded from the
+      # image on first start, so settings.json is there even before this
+      # volume has anything in it.
+      - claude-code-home:/home/agent
+
+    environment:
+      # Paths and switches only. Never a credential -- anything set here is
+      # visible in `docker inspect` to anyone in the docker group.
+      ORCH_ROOT: ${ORCH_ROOT:-/srv/orchestration}
+      CI: "1"
+      TERM: dumb
+      NO_COLOR: "1"
+      DISABLE_AUTOUPDATER: "1"
+
+    # The container is an exec target; work arrives via `docker exec` from
+    # the supervisor. It does nothing on its own.
+    command: ["sleep", "infinity"]
+
+    healthcheck:
+      test: ["CMD", "claude", "--version"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  claude-code-home:

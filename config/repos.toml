@@ -1,0 +1,20 @@
+# Repos an agent may be pointed at.
+#
+# `ask()` takes a free-text repo string and resolves it against these names
+# and aliases, so you can say "the kiln one" out loud rather than a path.
+# When two entries tie, ask() refuses and returns the candidates instead of
+# guessing -- the voice model can then ask you which you meant.
+#
+# A job with no repo is not an error: it gets a scratch directory instead of
+# a worktree. Plenty of questions need no checkout at all.
+
+[repos.main]
+url = "git@github.com:natinwave/multi-agent-orchestration.git"
+base_ref = "main"
+aliases = ["orchestration", "the orchestrator", "this repo", "multi agent"]
+
+# Examples, edit or delete. bootstrap.sh clones whatever is listed here.
+# [repos.kiln]
+# url = "git@github.com:natinwave/kiln-controller.git"
+# base_ref = "main"
+# aliases = ["kiln", "the kiln one", "kiln controller", "pottery"]

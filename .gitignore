@@ -1,0 +1,26 @@
+# Never commit resolved secrets. .env.example holds op:// references only.
+.env
+*.env
+!.env.example
+secrets/
+*.pem
+*.key
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Runtime state lives in /srv/orchestration, never in the repo.
+# This entry only catches an accidental local run.
+srv/
+run/
+
+# OS
+.DS_Store

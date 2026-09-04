@@ -1,0 +1,45 @@
+# The agent registry. Adding a backend is a config change, not a code change.
+#
+# Two backend types exist:
+#   container    -- docker exec into a persistent, named container
+#   http_openai  -- POST to an OpenAI-compatible /chat/completions endpoint
+#
+# NO SECRET VALUES HERE. `secrets_dir` names a host directory that
+# bootstrap.sh fills from 1Password; the container mounts only its own.
+
+[agents.claude-code]
+type = "container"
+description = "Long-horizon coding work in a container. Writes to a git worktree."
+container = "orch-claude-code"
+# Where this agent's credentials are materialised on the host (tmpfs, 0700)
+# and mounted read-only into its container at /run/secrets. Per-agent, so
+# claude-code cannot read hermes's identity or vice versa.
+secrets_dir = "/run/orchestration/secrets/claude-code"
+default_repo = "main"
+needs_repo = true
+# --dangerously-skip-permissions is acceptable here and ONLY here: the blast
+# radius is the container. Nothing run on the bare host uses it.
+command = [
+  "claude", "-p",
+  "--dangerously-skip-permissions",
+  "--output-format", "stream-json",
+  "--include-partial-messages",
+  "--verbose",
+]
+# Wall-clock ceiling. Long-horizon work, so this is generous.
+timeout_seconds = 14400
+
+[agents.hermes]
+type = "http_openai"
+description = "Local model on this host. Short-horizon questions, no repo needed."
+# STUB. Point this at the real server and re-run bootstrap.sh; nothing else
+# needs to change. The supervisor talks to it from the host, over loopback.
+base_url = "http://127.0.0.1:8080/v1"
+model = "hermes"
+secrets_dir = "/run/orchestration/secrets/hermes"
+# Optional: the file under secrets_dir holding a bearer token, if the server
+# wants one. Absent means the request goes out unauthenticated.
+api_key_file = "api_key"
+needs_repo = false
+timeout_seconds = 300
+max_tokens = 2048
