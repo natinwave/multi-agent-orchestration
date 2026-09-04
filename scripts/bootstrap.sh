@@ -73,7 +73,10 @@ if mkdir -p "$ORCH_ROOT"/{jobs,worktrees,scratch,repos,logs} 2>/dev/null; then
 elif sudo -n mkdir -p "$ORCH_ROOT"/{jobs,worktrees,scratch,repos,logs} 2>/dev/null; then
   sudo -n chown -R "$(id -u):$(id -g)" "$ORCH_ROOT" 2>/dev/null
 else
-  fail "cannot create ${ORCH_ROOT} -- run: sudo mkdir -p ${ORCH_ROOT} && sudo chown -R $(id -un) ${ORCH_ROOT}"
+  fail "cannot create ${ORCH_ROOT} without sudo"
+  info "run these two lines once, then re-run this script:"
+  info "  sudo mkdir -p ${ORCH_ROOT} ${ORCH_SECRETS}"
+  info "  sudo chown -R $(id -u):$(id -g) ${ORCH_ROOT} ${ORCH_SECRETS}"
 fi
 
 if [ -w "$ORCH_ROOT" ]; then
@@ -124,7 +127,11 @@ secrets_step() {
   if [ ! -d "$ORCH_SECRETS" ]; then
     mkdir -p "$ORCH_SECRETS" 2>/dev/null \
       || sudo -n mkdir -p "$ORCH_SECRETS" 2>/dev/null \
-      || { fail "cannot create ${ORCH_SECRETS} (needs sudo once)"; return; }
+      || {
+        fail "cannot create ${ORCH_SECRETS} without sudo"
+        info "run: sudo mkdir -p ${ORCH_SECRETS} && sudo chown -R $(id -u):$(id -g) ${ORCH_SECRETS}"
+        return
+      }
     sudo -n chown "$(id -u):$(id -g)" "$ORCH_SECRETS" 2>/dev/null
   fi
   chmod 0700 "$ORCH_SECRETS" 2>/dev/null
