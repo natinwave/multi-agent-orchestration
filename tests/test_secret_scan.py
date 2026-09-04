@@ -82,3 +82,32 @@ def test_the_repo_itself_is_clean() -> None:
     ).stdout.split()
     findings = scan([root / p for p in tracked])
     assert findings == [], f"secret-shaped content: {findings}"
+
+
+def test_python_keyword_arguments_are_not_findings(tmp_path: Path) -> None:
+    """`api_key=openai_key` is a kwarg. Flagging those makes the scanner
+    noisy enough that people stop running it."""
+    f = tmp_path / "call.py"
+    f.write_text("session = RealtimeSession(api_key=openai_key, token=discord_token)\n")
+    assert scan([f]) == []
+
+
+def test_a_quoted_secret_in_python_is_still_caught(tmp_path: Path) -> None:
+    """The exemption is for UNQUOTED right-hand sides only -- a literal in
+    Python has to be quoted, so this must still fire."""
+    f = tmp_path / "bad.py"
+    f.write_text('TOKEN = "ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"\n')
+    assert [x.line for x in scan([f])] == [1]
+
+
+def test_the_python_exemption_does_not_apply_to_env_files(tmp_path: Path) -> None:
+    """In a .env an unquoted right-hand side IS the value."""
+    f = tmp_path / ".env"
+    f.write_text("GITHUB_TOKEN=ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789\n")
+    assert [x.line for x in scan([f])] == [1]
+
+
+def test_the_python_exemption_does_not_apply_to_shell(tmp_path: Path) -> None:
+    f = tmp_path / "x.sh"
+    f.write_text("export API_KEY=abcdefghijklmnopqrstuvwx\n")
+    assert scan([f]) != []
