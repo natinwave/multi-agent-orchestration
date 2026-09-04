@@ -307,7 +307,7 @@ On the Ubuntu host:
 ```sh
 git clone https://github.com/natinwave/multi-agent-orchestration.git
 cd multi-agent-orchestration
-cp .env.example .env                    # references only; .env is gitignored
+cp -f .env.example .env                 # references only; .env is gitignored
 
 ./scripts/preflight.sh                  # changes nothing; relay the output
 

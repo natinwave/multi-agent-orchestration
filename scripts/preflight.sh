@@ -200,6 +200,26 @@ fi
 if have op; then
   if op whoami >/dev/null 2>&1; then
     pass "1Password CLI signed in"
+
+    # A .env left over from an earlier layout points at a vault that is not
+    # there any more, and op fails in a way that names neither file.
+    if [ -r "${HERE}/.env" ]; then
+      env_vaults="$(grep -o 'op://[^/]*' "${HERE}/.env" | sed 's|op://||' | sort -u)"
+      missing=""
+      for v in $env_vaults; do
+        op vault get "$v" >/dev/null 2>&1 || missing="${missing}${v} "
+      done
+      if [ -z "$env_vaults" ]; then
+        warn ".env contains no op:// references -- bootstrap will find no credentials"
+      elif [ -n "$missing" ]; then
+        fail ".env references vault(s) this account does not have: ${missing}"
+        info "if .env is stale, refresh it from the template: cp -f .env.example .env"
+      else
+        pass ".env references vault(s) that exist: $(printf '%s' "$env_vaults" | tr '\n' ' ' | clip)"
+      fi
+    else
+      warn "no .env yet -- create one: cp .env.example .env"
+    fi
   else
     fail "1Password CLI installed but not authenticated"
     info "headless: put a service account token at ~/.op-token (bootstrap finds it)"

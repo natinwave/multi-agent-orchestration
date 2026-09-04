@@ -152,15 +152,29 @@ secrets_step() {
   # running it under `op run`.
   if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] \
      && [ -r "${HERE}/.env" ] && have op; then
-    if resolved="$(op run --env-file="${HERE}/.env" --no-masking -- env 2>>"$LOG")"; then
+    op_err="$(mktemp)"
+    if resolved="$(op run --env-file="${HERE}/.env" --no-masking -- env 2>"$op_err")"; then
       for var in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY GH_TOKEN HERMES_API_KEY; do
         value="$(printf '%s\n' "$resolved" | sed -n "s/^${var}=//p" | head -1)"
         [ -n "$value" ] && export "${var}=${value}"
       done
       unset resolved value
     else
-      info "could not resolve .env through op -- see ${LOG}"
+      # This message is the whole diagnosis when it goes wrong, and it is
+      # read over chat, so it says what op said and which vaults exist
+      # rather than pointing at a log file nobody can see.
+      cat "$op_err" >> "$LOG"
+      info "op could not resolve .env: $(head -1 "$op_err" | clip)"
+      wanted="$(grep -o 'op://[^/]*' "${HERE}/.env" 2>/dev/null | sed 's|op://||' | sort -u | tr '\n' ' ')"
+      have="$(op vault list --format json 2>/dev/null \
+              | python3 -c 'import json,sys; print(" ".join(v["name"] for v in json.load(sys.stdin)))' 2>/dev/null)"
+      [ -n "$wanted" ] && info ".env asks for vault(s): ${wanted}"
+      [ -n "$have" ] && info "this account has:        ${have}"
+      if [ -n "$wanted" ] && [ -n "$have" ] && [ "$wanted" != "$have " ]; then
+        info "if .env is stale, refresh it: cp -f .env.example .env"
+      fi
     fi
+    rm -f "$op_err"
   fi
 
   local written=0 kept=0
