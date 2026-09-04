@@ -237,11 +237,32 @@ if have claude; then
   token_source=""
   [ -n "${ANTHROPIC_API_KEY:-}" ] && token_source="ANTHROPIC_API_KEY"
   [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && token_source="environment"
-  [ -z "$token_source" ] && [ -r "${ORCH_SECRETS:-/run/orchestration/secrets}/claude-code/oauth_token" ] \
-    && token_source="secrets file"
+  for f in oauth_token anthropic_api_key; do
+    [ -z "$token_source" ] && [ -r "${ORCH_SECRETS:-/run/orchestration/secrets}/claude-code/${f}" ] \
+      && token_source="secrets file"
+  done
+
+  # Nothing materialised yet is not the same as nothing available: on a
+  # fresh boot /run is empty and bootstrap has not run, but the credential
+  # is sitting in the vault and everything is in fact ready. Resolve the
+  # reference to find out. `op read` writes nothing, so this stays a
+  # read-only check -- and the value goes to /dev/null, never a variable.
+  if [ -z "$token_source" ] && [ -r "${HERE}/.env" ] && have op && op whoami >/dev/null 2>&1; then
+    for var in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY; do
+      ref="$(sed -n "s/^[[:space:]]*${var}=//p" "${HERE}/.env" | tr -d '"'"'"'' | head -1)"
+      case "$ref" in
+        op://*)
+          if op read "$ref" >/dev/null 2>&1; then
+            token_source="1Password, not yet materialised"
+            break
+          fi
+          ;;
+      esac
+    done
+  fi
 
   if [ -n "$token_source" ]; then
-    pass "claude oauth token present (${token_source})"
+    pass "claude credential available (${token_source})"
     if out="$(timeout 90 claude -p \
                 --permission-mode acceptEdits \
                 --allowedTools "" \

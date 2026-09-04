@@ -210,3 +210,20 @@ def test_root_setup_is_the_only_script_that_needs_root() -> None:
         if path.name == "root-setup.sh":
             continue
         assert "must run as root" not in path.read_text(), path
+
+
+def test_preflight_never_captures_a_resolved_secret_into_a_variable() -> None:
+    """preflight resolves the credential reference to prove it is reachable.
+    The exit code is the answer; the value must go to /dev/null, never into
+    a variable that some later line could print."""
+    for line in code_lines(PREFLIGHT):
+        if "op read" in line:
+            assert ">/dev/null" in line, f"op read must discard its output: {line.strip()}"
+            assert "$(" not in line.split("op read")[0][-3:], line
+
+
+def test_preflight_still_changes_nothing_when_resolving() -> None:
+    """`op read` is a read. If this ever becomes `op run` or `op inject`
+    writing a file, preflight's read-only promise is broken."""
+    for bad in ("op run", "op inject", "op item create", "op vault create"):
+        assert bad not in PREFLIGHT
