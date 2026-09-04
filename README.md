@@ -197,6 +197,17 @@ environment block, and never in `docker inspect`. `claude-code` and
 `hermes` mount different directories, so neither can read the other's
 identity.
 
+**`/run` is tmpfs, so this is deliberately lost on reboot.** After the
+machine restarts, re-run bootstrap under `op run` to put the credentials
+back; jobs will fail with a clear "no credential at /run/secrets" until you
+do. That is the intended trade: credentials never touch a disk.
+
+For a machine you are not sitting at, use a 1Password **service account**
+rather than `op signin` — the interactive sign-in expects the desktop app.
+Set `OP_SERVICE_ACCOUNT_TOKEN` and `op run` works headlessly. That token is
+itself a secret and has to live somewhere; a root-owned file sourced by the
+operator, or a systemd credential, is the usual answer.
+
 `--dangerously-skip-permissions` is used **inside the container and nowhere
 else**. Anything invoking `claude` on the bare host uses
 `--permission-mode acceptEdits` with a scoped `--allowedTools`. A test

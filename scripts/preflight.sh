@@ -123,6 +123,14 @@ if have python3; then
   else
     fail "python ${py_v} -- 3.12 or newer required (tomllib, StrEnum)"
   fi
+
+  # Ubuntu ships venv as a separate package, and without it bootstrap fails
+  # several steps in with an error that does not name the cause.
+  if python3 -c 'import venv, ensurepip' 2>/dev/null; then
+    pass "python venv available"
+  else
+    fail "python venv missing -- run: sudo apt install python3-venv"
+  fi
 else
   fail "python3 not installed"
 fi
