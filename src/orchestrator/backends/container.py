@@ -24,7 +24,9 @@ from .base import BackendError, Outcome
 
 __all__ = ["ContainerBackend"]
 
-# Read inside the container, exported for one process, never persisted.
+# The agent's own identity, read inside the container and exported for one
+# process. These two have fixed environment names; anything else granted
+# later is exported under its own uppercased filename.
 SECRET_ENV = {
     "CLAUDE_CODE_OAUTH_TOKEN": "oauth_token",
     "GH_TOKEN": "github_token",
@@ -130,6 +132,21 @@ class ContainerBackend:
             lines.append(
                 f'if [ -r {path} ]; then export {env_name}="$(cat {path})"; fi'
             )
+
+        # Delegated credentials. Each one you grant appears here as a file
+        # and is exported as its uppercased name, so the agent never reads
+        # /run/secrets itself -- the value is simply already in the
+        # environment of the tools that need it.
+        reserved = " ".join(sorted(SECRET_ENV.values()))
+        lines.append(
+            "for _f in /run/secrets/*; do\n"
+            '  [ -r "$_f" ] || continue\n'
+            '  _n="$(basename "$_f")"\n'
+            f'  case " {reserved} " in *" $_n "*) continue ;; esac\n'
+            '  case "$_n" in .*) continue ;; esac\n'
+            "  export \"$(printf '%s' \"$_n\" | tr '[:lower:]-' '[:upper:]_')=$(cat \"$_f\")\"\n"
+            "done"
+        )
         lines.append(
             'if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then'
         )

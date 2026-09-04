@@ -68,6 +68,26 @@ def _fmt_repos(result: dict) -> str:
     )
 
 
+def _fmt_credentials(result: dict) -> str:
+    items = result["credentials"]
+    if not items:
+        return f"vault {result['vault']} is empty"
+    width = max(len(i["title"]) for i in items)
+    return "\n".join(f"{i['title']:<{width}}  ${i['env_var']}" for i in items)
+
+
+def _fmt_grants(result: dict) -> str:
+    grants = result["grants"]
+    if not grants:
+        return "no credentials are currently delegated"
+    width = max(len(g["agent"]) for g in grants)
+    return "\n".join(
+        f"{g['agent']:<{width}}  {g['credential']:<28} ${g['env_var']:<24} "
+        f"{('job ' + g['job_id']) if g['job_id'] else 'until revoked'}"
+        for g in grants
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orchestrate", description=__doc__.splitlines()[0])
     parser.add_argument("--json", action="store_true", help="emit raw JSON instead of text")
@@ -95,6 +115,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("list-agents", help="list configured agents")
     sub.add_parser("list-repos", help="list repos and the names you can call them")
+
+    sub.add_parser("list-credentials", help="what the vault is willing to share")
+    sub.add_parser("list-grants", help="what each agent can currently reach")
+
+    p_grant = sub.add_parser("grant", help="give an agent access to a credential")
+    p_grant.add_argument("agent")
+    p_grant.add_argument("credential", nargs="+")
+    p_grant.add_argument("--job", help="scope the grant to one job, revoked when it ends")
+
+    p_revoke = sub.add_parser("revoke", help="withdraw a credential from an agent")
+    p_revoke.add_argument("agent")
+    p_revoke.add_argument("credential", nargs="+")
 
     p_reap = sub.add_parser("reap", help="delete a finished job's workspace")
     p_reap.add_argument("job_id")
@@ -134,6 +166,27 @@ def main(argv: list[str] | None = None) -> int:
         case "list-repos":
             result = sup.list_repos()
             text = _fmt_repos(result)
+        case "list-credentials":
+            result = sup.list_credentials()
+            text = _fmt_error(result) if "error" in result else _fmt_credentials(result)
+        case "list-grants":
+            result = sup.list_grants()
+            text = _fmt_error(result) if "error" in result else _fmt_grants(result)
+        case "grant":
+            result = sup.grant(args.agent, " ".join(args.credential), job_id=args.job)
+            text = (
+                _fmt_error(result)
+                if "error" in result
+                else f"granted {result['granted']} to {result['agent']} "
+                f"as ${result['env_var']} ({result['scope']})"
+            )
+        case "revoke":
+            result = sup.revoke(args.agent, " ".join(args.credential))
+            text = (
+                _fmt_error(result)
+                if "error" in result
+                else f"revoked {result['revoked']} from {result['agent']}"
+            )
         case "reap":
             result = sup.reap(args.job_id, keep_branch=not args.delete_branch)
             text = _fmt_error(result) if "error" in result else f"{args.job_id}  reaped"

@@ -84,7 +84,9 @@ timeout_seconds = 30
         '[repos.main]\nurl = "git@h:o/main.git"\naliases = ["this repo"]\n'
     )
     (cfg_dir / "orchestrator.toml").write_text(
-        f'[paths]\nroot = "{tmp_path / "srv"}"\n[check]\ndefault_narration_lines = 3\n'
+        f'[paths]\nroot = "{tmp_path / "srv"}"\n'
+        f"[check]\ndefault_narration_lines = 3\n"
+        f'[credentials]\nsecrets_root = "{tmp_path / "secrets"}"\n'
     )
     config = load(cfg_dir, root_override=tmp_path / "srv")
     return Supervisor.create(config=config, environ={})
@@ -191,7 +193,30 @@ def test_a_registered_env_secret_is_scrubbed(tmp_path: Path, sup: Supervisor) ->
 
 # --- redaction, structurally -----------------------------------------------
 
-PUBLIC = ["ask", "check", "reply", "list_agents", "list_jobs", "list_repos", "reap"]
+PUBLIC = [
+    "ask",
+    "check",
+    "reply",
+    "list_agents",
+    "list_jobs",
+    "list_repos",
+    "reap",
+    "list_credentials",
+    "grant",
+    "revoke",
+    "list_grants",
+]
+
+
+def test_public_list_covers_every_public_method() -> None:
+    """The AST guard below only proves what this list names, so the list
+    itself has to stay complete as methods are added."""
+    actual = {
+        name
+        for name in vars(Supervisor)
+        if not name.startswith("_") and callable(getattr(Supervisor, name))
+    } - {"create"}
+    assert actual == set(PUBLIC)
 
 
 @pytest.mark.parametrize("method", PUBLIC)
@@ -340,3 +365,95 @@ def test_reap_refuses_a_live_job(sup: Supervisor) -> None:
     if "error" in result:
         assert result["error"] == "still_running"
     wait_for_terminal(sup, job_id)
+
+
+# --- credential delegation, through the supervisor -------------------------
+
+VAULT_ITEMS = [{"title": "Staging DB Password"}, {"title": "AXE RxAPI Key"}]
+VAULT_VALUE = "staging-pw-value-here"
+
+
+@pytest.fixture
+def sup_with_vault(sup: Supervisor, monkeypatch: pytest.MonkeyPatch) -> Supervisor:
+    def fake_op(argv):
+        if argv[:2] == ["item", "list"]:
+            return json.dumps(VAULT_ITEMS)
+        return json.dumps(
+            {"fields": [{"label": "password", "type": "CONCEALED", "value": VAULT_VALUE}]}
+        )
+
+    monkeypatch.setattr("orchestrator.credentials._run_op", fake_op)
+    return sup
+
+
+def test_list_credentials_returns_titles_and_env_vars(sup_with_vault: Supervisor) -> None:
+    result = sup_with_vault.list_credentials()
+    assert [c["title"] for c in result["credentials"]] == [
+        "AXE RxAPI Key",
+        "Staging DB Password",
+    ]
+    assert "STAGING_DB_PASSWORD" in json.dumps(result)
+
+
+def test_list_credentials_never_returns_a_value(sup_with_vault: Supervisor) -> None:
+    assert VAULT_VALUE not in json.dumps(sup_with_vault.list_credentials())
+
+
+def test_grant_reports_the_env_var_not_the_value(sup_with_vault: Supervisor) -> None:
+    """The voice agent relays this to you and to the coding agent, so it
+    has to name the variable and never speak the secret."""
+    result = sup_with_vault.grant("hermes", "the staging password")
+    assert result["env_var"] == "STAGING_DB_PASSWORD"
+    assert result["agent"] == "hermes"
+    assert VAULT_VALUE not in json.dumps(result)
+
+
+def test_grant_scoped_to_a_job_says_so(sup_with_vault: Supervisor) -> None:
+    job_id = sup_with_vault.ask("hermes", "do the thing")["job_id"]
+    result = sup_with_vault.grant("hermes", "staging", job_id=job_id)
+    assert result["scope"] == "this job only"
+    wait_for_terminal(sup_with_vault, job_id)
+
+
+def test_grant_to_an_unknown_agent_is_refused(sup_with_vault: Supervisor) -> None:
+    assert sup_with_vault.grant("nope", "staging")["error"] == "unknown_agent"
+
+
+def test_grant_against_an_unknown_job_is_refused(sup_with_vault: Supervisor) -> None:
+    """Otherwise the grant would never be revoked, because no job ends."""
+    assert sup_with_vault.grant("hermes", "staging", job_id="ghost")["error"] == "unknown_job"
+
+
+def test_ambiguous_credential_asks(sup: Supervisor, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "orchestrator.credentials._run_op",
+        lambda argv: json.dumps([{"title": "Prod API Key"}, {"title": "Prod API Secret"}]),
+    )
+    result = sup.grant("hermes", "prod api")
+    assert result["error"] == "ambiguous_credential"
+    assert result["candidates"] == ["Prod API Key", "Prod API Secret"]
+
+
+def test_revoke_round_trip(sup_with_vault: Supervisor) -> None:
+    sup_with_vault.grant("hermes", "staging")
+    assert sup_with_vault.list_grants()["grants"]
+    assert sup_with_vault.revoke("hermes", "Staging DB Password")["revoked"]
+    assert sup_with_vault.list_grants()["grants"] == []
+
+
+def test_revoking_what_was_never_granted(sup_with_vault: Supervisor) -> None:
+    assert sup_with_vault.revoke("hermes", "staging")["error"] == "not_granted"
+
+
+def test_list_grants_never_leaks_a_value(sup_with_vault: Supervisor) -> None:
+    sup_with_vault.grant("hermes", "staging")
+    assert VAULT_VALUE not in json.dumps(sup_with_vault.list_grants())
+
+
+def test_a_finished_job_releases_its_scoped_grant(sup_with_vault: Supervisor) -> None:
+    """The runner drops job-scoped grants on exit, so a credential handed
+    over for one piece of work does not outlive it."""
+    job_id = sup_with_vault.ask("hermes", "do the thing")["job_id"]
+    sup_with_vault.grant("hermes", "staging", job_id=job_id)
+    wait_for_terminal(sup_with_vault, job_id)
+    assert sup_with_vault.list_grants()["grants"] == []

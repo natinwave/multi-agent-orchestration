@@ -213,6 +213,49 @@ else**. Anything invoking `claude` on the bare host uses
 `--permission-mode acceptEdits` with a scoped `--allowedTools`. A test
 enforces that the dangerous flag never appears in a host-side script.
 
+### Delegating credentials
+
+Everything above covers an agent's *own* identity. Anything else it might
+need — a staging database password, a third-party API key — is delegated
+deliberately, one grant at a time.
+
+The `Agent` vault in 1Password is the pool you are **willing** to share.
+Nothing in it reaches an agent until you say so:
+
+```sh
+./bin/orchestrate list-credentials              # the menu, titles only
+./bin/orchestrate grant claude-code the staging password --job kestrel
+# granted Staging DB Password to claude-code as $STAGING_DB_PASSWORD (this job only)
+./bin/orchestrate list-grants                   # what each agent can reach
+./bin/orchestrate revoke claude-code "Staging DB Password"
+```
+
+Three properties make this cheap rather than elaborate:
+
+- **A grant takes effect with no restart.** `secrets/<agent>/` is already
+  bind-mounted into that agent's container, so a new file inside it simply
+  appears.
+- **Scoping is structural.** Each container mounts only its own directory,
+  so a grant to `claude-code` is invisible to `hermes` — not by policy, by
+  the mount table.
+- **No value ever passes through the supervisor's replies.** These calls
+  return titles and the environment variable name, and they go through the
+  same `_out()` chokepoint as everything else.
+
+The agent never reads `/run/secrets` itself. Each granted file is exported
+into the job's environment under its uppercased name, so `Staging DB
+Password` arrives as `$STAGING_DB_PASSWORD` — which is what you tell the
+agent to use. `docker/agent-prompt.md` instructs it to park with
+`awaiting_input` if a credential it needs is missing, rather than hunting
+for one or working around it.
+
+`--job` ties a grant to one job, and the runner drops it when that job
+ends. Every grant and revoke appends to `logs/grants.log`.
+
+**The honest limit:** revoking stops *future* reads. A job that already
+read the value holds it in memory until it exits. If you need it back right
+now, end the job.
+
 ---
 
 ## Concurrency
@@ -309,8 +352,15 @@ spawns the server itself:
 ```
 
 Tools: `ask`, `check`, `list_agents`, `list_jobs`, plus `reply` (answer a
-parked job) and `list_repos` (the names a repo answers to). A front-end
-that only uses the first four works fine.
+parked job), `list_repos` (the names a repo answers to), and
+`list_credentials` / `grant` / `revoke` / `list_grants` for delegation. A
+front-end that only uses the first four works fine.
+
+`grant`'s description tells the client model, in as many words, to read
+back what it is about to grant and wait for you to agree. That docstring is
+the only thing between a spoken "sure" and a live secret reaching a process
+that runs model-authored commands, so it is written as prompt surface
+rather than as documentation.
 
 ### Naming a repo out loud
 
@@ -371,7 +421,7 @@ about any of it:
 What *is* covered off-host, and is worth running before you push:
 
 ```sh
-.venv/bin/python -m pytest -q          # 262 tests
+.venv/bin/python -m pytest -q          # 322 tests
 ./scripts/check-no-secrets.sh
 docker compose -f docker/docker-compose.yml config     # schema only
 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \

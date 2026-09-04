@@ -57,6 +57,18 @@ def run_job(paths: JobPaths, config: Config, resume: bool = False) -> JobState:
         narrate(paths.narration, f"could not start: {detail}")
         exit_code = 70
 
+    # A grant tied to this job dies with it. Best-effort: a job must still
+    # be marked finished even if the secrets directory has gone away.
+    try:
+        revoked = config.credential_store().revoke_for_job(meta.job_id)
+        if revoked:
+            narrate(
+                paths.narration,
+                f"released {len(revoked)} delegated credential(s)",
+            )
+    except Exception:  # noqa: BLE001 - never let cleanup mask the result
+        pass
+
     state = final_state(exit_code, last_state(paths.narration))
     Status(
         state=state,

@@ -31,6 +31,17 @@ scrub_env = [
   "OP_SERVICE_ACCOUNT_TOKEN",
 ]
 
+[credentials]
+# The 1Password vault holding what you are willing to share with agents.
+# Nothing in it reaches an agent until you grant it, per agent, by name.
+vault = "Agent"
+
+# Where grants are materialised, one directory per agent, each mounted
+# read-only into that agent's container. On tmpfs on purpose: credentials
+# never touch a disk, and are deliberately lost on reboot.
+# Overridden by the ORCH_SECRETS environment variable.
+secrets_root = "/run/orchestration/secrets"
+
 [jobs]
 # Jobs older than this are eligible for reaping, which frees their name.
 retain_days = 14

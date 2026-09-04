@@ -22,7 +22,14 @@ pytest.importorskip("mcp", reason="MCP server is an optional extra: pip install 
 from orchestrator.mcp_server import build_server  # noqa: E402
 
 BRIEF_TOOLS = {"ask", "check", "list_agents", "list_jobs"}
-EXTRA_TOOLS = {"reply", "list_repos"}
+EXTRA_TOOLS = {
+    "reply",
+    "list_repos",
+    "list_credentials",
+    "grant",
+    "revoke",
+    "list_grants",
+}
 
 
 @pytest.fixture
@@ -42,6 +49,18 @@ def server(tmp_path: Path):
 def call(server, name: str, args: dict) -> dict:
     result = asyncio.run(server.call_tool(name, args))
     return json.loads(result.content[0].text)
+
+
+def test_grant_tells_the_model_to_get_permission_first(server) -> None:
+    """The docstring is the only thing standing between a spoken "sure" and
+    a live secret going to a process that runs model-authored commands."""
+    (grant,) = [t for t in asyncio.run(server[0].list_tools()) if t.name == "grant"]
+    assert "WAIT FOR THE USER" in (grant.description or "")
+
+
+def test_credential_listing_advertises_that_it_returns_no_values(server) -> None:
+    (tool,) = [t for t in asyncio.run(server[0].list_tools()) if t.name == "list_credentials"]
+    assert "never returns a value" in (tool.description or "")
 
 
 def test_exposes_the_four_tools_the_brief_asked_for(server) -> None:

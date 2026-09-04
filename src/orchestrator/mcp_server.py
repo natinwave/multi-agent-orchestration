@@ -41,7 +41,10 @@ def build_server(sup: Supervisor) -> MCPServer:
             "Raw logs are only returned if you pass tail=N, which is large "
             "and rarely what you want.\n\n"
             "Jobs run for minutes to hours. Do not wait on one: start it, "
-            "tell the user its name, and check back when they ask."
+            "tell the user its name, and check back when they ask.\n\n"
+            "Agents hold no credentials by default. grant() hands one over "
+            "and needs the user's explicit say-so first, every time -- read "
+            "back what you are about to grant and to whom, then wait."
         ),
     )
 
@@ -95,6 +98,51 @@ def build_server(sup: Supervisor) -> MCPServer:
         active_only: hide finished jobs. Useful for "what's still running?".
         """
         return sup.list_jobs(active_only=active_only, limit=limit)
+
+    @server.tool()
+    def list_credentials() -> dict:
+        """Credentials the user is willing to share with agents.
+
+        Titles only -- this never returns a value. Nothing here reaches an
+        agent until grant() is called for it.
+        """
+        return sup.list_credentials()
+
+    @server.tool()
+    def grant(agent: str, credential: str, job_id: str | None = None) -> dict:
+        """Give one agent access to one credential.
+
+        SAY WHAT YOU ARE ABOUT TO GRANT, TO WHOM, AND WAIT FOR THE USER TO
+        AGREE BEFORE CALLING THIS. It hands a live secret to a process that
+        runs model-authored commands. Never call it speculatively, never to
+        "just in case" an agent might need something, and never in the same
+        breath as ask().
+
+        credential: what the user called it. Ambiguity returns candidates
+            rather than picking one -- read those back and ask which.
+        job_id: scope the grant to one job, so it is withdrawn when that
+            job ends. Prefer this whenever the credential is for a specific
+            piece of work.
+
+        Returns the environment variable the agent will find it in; tell
+        the agent that name, not the value, which you never see.
+        """
+        return sup.grant(agent=agent, credential=credential, job_id=job_id)
+
+    @server.tool()
+    def revoke(agent: str, credential: str) -> dict:
+        """Withdraw a credential from an agent.
+
+        Stops future reads. A job already holding the value keeps it until
+        it exits, so say so if the user is revoking something urgently --
+        ending the job is what actually takes it back.
+        """
+        return sup.revoke(agent=agent, credential=credential)
+
+    @server.tool()
+    def list_grants() -> dict:
+        """What each agent can currently reach, and since when."""
+        return sup.list_grants()
 
     @server.tool()
     def list_repos() -> dict:

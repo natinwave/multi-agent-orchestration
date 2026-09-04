@@ -26,9 +26,11 @@ __all__ = [
     "Repo",
     "Config",
     "load",
+    "normalise",
     "default_config_dir",
     "CONFIG_DIR_ENV",
     "ROOT_ENV",
+    "SECRETS_ENV",
     "AmbiguousRepo",
     "UnknownRepo",
     "UnknownAgent",
@@ -42,6 +44,7 @@ DEFAULT_CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 # keeps that out of meta.json, where it would go stale if the repo moved.
 CONFIG_DIR_ENV = "ORCH_CONFIG_DIR"
 ROOT_ENV = "ORCH_ROOT"
+SECRETS_ENV = "ORCH_SECRETS"  # the name bootstrap.sh already uses
 
 
 def default_config_dir(environ: Mapping[str, str] | None = None) -> Path:
@@ -101,7 +104,7 @@ class Repo:
     aliases: tuple[str, ...] = ()
 
 
-def _normalise(s: str) -> list[str]:
+def normalise(s: str) -> list[str]:
     """Reduce spoken text to comparable tokens - lowercase, filler dropped."""
     words = re.findall(r"[a-z0-9]+", s.lower())
     return [w for w in words if w not in {"the", "a", "an", "one", "repo", "project"}]
@@ -120,6 +123,8 @@ class Config:
     entropy_fallback: bool = True
     scrub_env: tuple[str, ...] = ()
     retain_days: int = 14
+    vault: str = "Agent"
+    secrets_root: Path = Path("/run/orchestration/secrets")
     _repo_index: dict[str, set[str]] = field(default_factory=dict, repr=False)
 
     # -- paths --------------------------------------------------------------
@@ -146,6 +151,24 @@ class Config:
 
     def repo_path(self, name: str) -> Path:
         return self.repos_dir / name
+
+    @property
+    def audit_log(self) -> Path:
+        return self.logs_dir / "grants.log"
+
+    def credential_store(self):
+        """The delegation store, built from this config.
+
+        Imported lazily: the runner needs it, but nothing in the hot path
+        of check() does.
+        """
+        from .credentials import CredentialStore
+
+        return CredentialStore(
+            secrets_root=self.secrets_root,
+            vault=self.vault,
+            audit_log=self.audit_log,
+        )
 
     # -- lookup -------------------------------------------------------------
 
@@ -185,7 +208,7 @@ class Config:
 
         # Loose match: does every word the caller said appear among this
         # repo's name and aliases? "the kiln one" -> {kiln} -> kiln.
-        wanted = set(_normalise(query))
+        wanted = set(normalise(query))
         if not wanted:
             raise UnknownRepo(query, sorted(self.repos))
         hits = [name for name, toks in self._repo_index.items() if wanted <= toks]
@@ -263,6 +286,7 @@ def load(config_dir: Path | None = None, root_override: Path | None = None) -> C
 
     check = orch.get("check", {})
     red = orch.get("redaction", {})
+    creds = orch.get("credentials", {})
     root = root_override or Path(orch.get("paths", {}).get("root", "/srv/orchestration"))
 
     cfg = Config(
@@ -277,11 +301,16 @@ def load(config_dir: Path | None = None, root_override: Path | None = None) -> C
         entropy_fallback=red.get("entropy_fallback", True),
         scrub_env=tuple(red.get("scrub_env", ())),
         retain_days=orch.get("jobs", {}).get("retain_days", 14),
+        vault=creds.get("vault", "Agent"),
+        secrets_root=Path(
+            os.environ.get(SECRETS_ENV)
+            or creds.get("secrets_root", "/run/orchestration/secrets")
+        ),
     )
     cfg._repo_index = {
-        name: set(_normalise(name))
-        | {t for a in repo.aliases for t in _normalise(a)}
-        | set(_normalise(_slug(repo.url)))
+        name: set(normalise(name))
+        | {t for a in repo.aliases for t in normalise(a)}
+        | set(normalise(_slug(repo.url)))
         for name, repo in repos.items()
     }
     return cfg

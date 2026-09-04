@@ -105,6 +105,21 @@ fi
 # From 1Password into per-agent tmpfs directories. Each agent's container
 # mounts only its own, read-only, so identities stay separated.
 
+# A machine nobody is sitting at wants a 1Password service account rather
+# than an interactive sign-in, so pick the token up from a file if one is
+# there and the environment does not already carry it. Read, never printed,
+# never copied anywhere.
+if [ -z "${OP_SERVICE_ACCOUNT_TOKEN:-}" ]; then
+  for candidate in "${OP_TOKEN_FILE:-}" "${HOME}/.op-token" "${HERE}/.op-token"; do
+    if [ -n "$candidate" ] && [ -r "$candidate" ]; then
+      OP_SERVICE_ACCOUNT_TOKEN="$(tr -d '[:space:]' < "$candidate")"
+      export OP_SERVICE_ACCOUNT_TOKEN
+      info "using the 1Password service account token from ${candidate}"
+      break
+    fi
+  done
+fi
+
 secrets_step() {
   if [ ! -d "$ORCH_SECRETS" ]; then
     mkdir -p "$ORCH_SECRETS" 2>/dev/null \
@@ -124,6 +139,22 @@ secrets_step() {
     ( umask 077; printf '%s' "$value" > "${dest}.tmp" ) && mv "${dest}.tmp" "$dest"
     chmod 0400 "$dest"
   }
+
+  # With a service account token present we can resolve the references in
+  # .env ourselves, so a bare ./scripts/bootstrap.sh works the same as
+  # running it under `op run`.
+  if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] \
+     && [ -r "${HERE}/.env" ] && have op; then
+    if resolved="$(op run --env-file="${HERE}/.env" --no-masking -- env 2>>"$LOG")"; then
+      for var in CLAUDE_CODE_OAUTH_TOKEN GH_TOKEN HERMES_API_KEY; do
+        value="$(printf '%s\n' "$resolved" | sed -n "s/^${var}=//p" | head -1)"
+        [ -n "$value" ] && export "${var}=${value}"
+      done
+      unset resolved value
+    else
+      info "could not resolve .env through op -- see ${LOG}"
+    fi
+  fi
 
   local written=0 kept=0
   if write_secret claude-code oauth_token "${CLAUDE_CODE_OAUTH_TOKEN:-}"; then

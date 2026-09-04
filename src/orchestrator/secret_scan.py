@@ -28,6 +28,12 @@ __all__ = ["Finding", "scan", "main", "MARKER"]
 OP_REFERENCE = re.compile(r"op://[\w\-./%~+@]+")
 OP_PLACEHOLDER = "op-ref"
 
+# `credential=credential` is a keyword argument, not a secret: a real value
+# is never literally its own key name. The redactor keeps flagging these
+# because over-redacting a log line costs nothing, but the scanner has to
+# stay quiet enough that people keep running it.
+SELF_ASSIGNMENT = re.compile(r"\b(\w+)(\s*[:=]\s*)\1\b")
+
 # Some files must contain credential-shaped text to do their job: the
 # redaction module documents every shape it matches, and the tests plant
 # fake credentials to prove they get scrubbed. Rather than a list here that
@@ -59,6 +65,7 @@ def scan(paths: list[Path], redactor: Redactor | None = None, exempt=frozenset()
             continue
         for number, raw in enumerate(text.splitlines(), 1):
             probe = OP_REFERENCE.sub(OP_PLACEHOLDER, raw)
+            probe = SELF_ASSIGNMENT.sub(r"k\g<2>v", probe)
             if red.scrub(probe) != probe:
                 findings.append(Finding(path, number, raw.strip()[:MAX_SNIPPET]))
     return findings

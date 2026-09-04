@@ -24,12 +24,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import ids
+from .credentials import (
+    AmbiguousCredential,
+    CredentialError,
+    UnknownCredential,
+)
 from .narration import append as narrate
 from .narration import read_tail
 from .redaction import Redactor
 from .registry import (
     CONFIG_DIR_ENV,
     ROOT_ENV,
+    SECRETS_ENV,
     AmbiguousRepo,
     Config,
     UnknownAgent,
@@ -266,6 +272,121 @@ class Supervisor:
         jobs.sort(key=lambda j: j["created_at"] or "", reverse=True)
         return self._out({"jobs": jobs[:limit]})
 
+    # -- credential delegation ----------------------------------------------
+    # The vault is the pool you are willing to share; a grant is what is
+    # actually live. Values never pass through here -- only titles, the
+    # filename a grant uses, and the environment variable it becomes.
+
+    def list_credentials(self) -> dict:
+        """Titles in the vault. The menu, never the contents."""
+        try:
+            items = self.config.credential_store().available()
+        except CredentialError as exc:
+            return self._out({"error": "vault_unavailable", "message": str(exc)})
+        return self._out(
+            {
+                "vault": self.config.vault,
+                "credentials": [
+                    {"title": i.title, "env_var": i.env_var} for i in items
+                ],
+            }
+        )
+
+    def grant(self, agent: str, credential: str, job_id: str | None = None) -> dict:
+        """Expose one credential to one agent.
+
+        Takes effect immediately: the per-agent secrets directory is
+        already bind-mounted into that container, so the next job sees it
+        without a restart.
+        """
+        try:
+            self.config.agent(agent)
+        except UnknownAgent as exc:
+            return self._out(
+                {
+                    "error": "unknown_agent",
+                    "message": f"no agent called {exc.name!r}",
+                    "known": exc.known,
+                }
+            )
+        if job_id is not None and self._paths(job_id) is None:
+            return self._out({"error": "unknown_job", "message": f"no job called {job_id!r}"})
+
+        try:
+            granted = self.config.credential_store().grant(agent, credential, job_id=job_id)
+        except AmbiguousCredential as exc:
+            return self._out(
+                {
+                    "error": "ambiguous_credential",
+                    "message": str(exc),
+                    "candidates": exc.candidates,
+                }
+            )
+        except UnknownCredential as exc:
+            return self._out(
+                {"error": "unknown_credential", "message": str(exc), "known": exc.known}
+            )
+        except CredentialError as exc:
+            return self._out({"error": "grant_failed", "message": str(exc)})
+
+        return self._out(
+            {
+                "granted": granted.title,
+                "agent": granted.agent,
+                "env_var": granted.env_var,
+                "job_id": granted.job_id,
+                "scope": "this job only" if granted.job_id else "until revoked",
+            }
+        )
+
+    def revoke(self, agent: str, credential: str) -> dict:
+        """Withdraw a credential from an agent.
+
+        Stops future reads. A job already holding the value keeps it until
+        it exits -- end the job if you need that back.
+        """
+        store = self.config.credential_store()
+        name = credential.strip().lower()
+        # Accept the spoken title as well as the filename.
+        if not any(g.name == name for g in store.grants()):
+            for g in store.grants():
+                if g.title and g.title.lower() == credential.strip().lower():
+                    name = g.name
+                    break
+        try:
+            removed = store.revoke(agent, name)
+        except CredentialError as exc:
+            return self._out({"error": "revoke_failed", "message": str(exc)})
+        if not removed:
+            return self._out(
+                {
+                    "error": "not_granted",
+                    "message": f"{agent} does not have {credential!r}",
+                }
+            )
+        return self._out({"revoked": name, "agent": agent})
+
+    def list_grants(self) -> dict:
+        """What each agent can currently reach."""
+        try:
+            grants = self.config.credential_store().grants()
+        except CredentialError as exc:
+            return self._out({"error": "vault_unavailable", "message": str(exc)})
+        return self._out(
+            {
+                "grants": [
+                    {
+                        "agent": g.agent,
+                        "credential": g.title or g.name,
+                        "env_var": g.env_var,
+                        "job_id": g.job_id,
+                        "granted_at": g.granted_at,
+                    }
+                    for g in grants
+                ]
+            }
+        )
+
     # -- internals ----------------------------------------------------------
 
     def _out(self, payload: dict) -> dict:
@@ -329,6 +450,9 @@ class Supervisor:
         # drift apart mid-job.
         env[CONFIG_DIR_ENV] = str(self.config.config_dir)
         env[ROOT_ENV] = str(self.config.root)
+        # The runner revokes this job's grants when it ends, so it has to
+        # look in the same secrets directory the supervisor granted into.
+        env[SECRETS_ENV] = str(self.config.secrets_root)
 
         with open(os.devnull, "rb") as devnull, paths.raw.open("ab") as log:
             proc = subprocess.Popen(

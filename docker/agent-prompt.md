@@ -47,6 +47,18 @@ request unless you were asked to.
 
 ### Credentials
 
-Anything under `/run/secrets` is a live credential scoped to this agent.
-Never read one, never echo one, never write one into a file or a commit.
-Tools that need them already have them in their environment.
+Anything under `/run/secrets` is a live credential. Never read one, never
+echo one, never write one into a file or a commit.
+
+You do not need to: every credential granted to you is already in your
+environment under an uppercased name. If you were told the staging database
+password is in `STAGING_DB_PASSWORD`, use `$STAGING_DB_PASSWORD` — do not
+print it, do not paste it into a config file that gets committed, and do
+not include it in anything you narrate.
+
+If a credential you need is missing, say so and stop:
+
+    narrate --state awaiting_input "I need database access to run the migration"
+
+Someone has to grant it deliberately. Do not look for one elsewhere on the
+filesystem, and do not work around its absence.
