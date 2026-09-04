@@ -190,7 +190,8 @@ secrets_step() {
      && [ -r "${HERE}/.env" ] && have op; then
     op_err="$(mktemp)"
     if resolved="$(op run --env-file="${HERE}/.env" --no-masking -- env 2>"$op_err")"; then
-      for var in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY GH_TOKEN HERMES_API_KEY; do
+      for var in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY GH_TOKEN \
+                  HERMES_API_KEY OPENAI_API_KEY DISCORD_BOT_TOKEN; do
         value="$(printf '%s\n' "$resolved" | sed -n "s/^${var}=//p" | head -1)"
         [ -n "$value" ] && export "${var}=${value}"
       done
@@ -232,6 +233,18 @@ secrets_step() {
   if write_secret hermes api_key "${HERMES_API_KEY:-}"; then
     written=$((written + 1))
   elif [ -r "${ORCH_SECRETS}/hermes/api_key" ]; then
+    kept=$((kept + 1))
+  fi
+  # The voice bridge is its own identity: the coding agents never see these
+  # and it never sees theirs.
+  if write_secret voice openai_api_key "${OPENAI_API_KEY:-}"; then
+    written=$((written + 1))
+  elif [ -r "${ORCH_SECRETS}/voice/openai_api_key" ]; then
+    kept=$((kept + 1))
+  fi
+  if write_secret voice discord_bot_token "${DISCORD_BOT_TOKEN:-}"; then
+    written=$((written + 1))
+  elif [ -r "${ORCH_SECRETS}/voice/discord_bot_token" ]; then
     kept=$((kept + 1))
   fi
 

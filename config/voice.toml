@@ -1,0 +1,23 @@
+# The voice layer. Phase two: talk to your agents from anywhere.
+#
+# Secrets are NOT here. openai_api_key and discord_bot_token are read from
+# /run/orchestration/secrets/voice/, materialised by bootstrap from the
+# references in .env -- the same path every other identity uses.
+
+[voice]
+# The Discord voice channel the bot joins on startup. Right-click the
+# channel with developer mode on and copy its id.
+discord_channel_id = 0
+
+# Speech-to-speech model. gpt-realtime-2 carries reasoning; the effort is
+# pinned low in protocol.py because a thinking pause reads as a dropped
+# call.
+model = "gpt-realtime-2.1"
+voice = "marin"
+
+# Appended to the base instructions, never merged over them. Put anything
+# site-specific here: which repos matter, how you refer to things.
+extra_instructions = """
+The kiln repo is a pottery kiln controller. PharmacyChecker is a drug
+price comparison site with several repos; "the API" means data-api.
+"""

@@ -11,6 +11,10 @@ dependencies = []
 # Only mcp_server.py needs this. Pinned to 2.x: the SDK renamed FastMCP to
 # MCPServer at 2.0 and mcp_server.py is written against the new API.
 mcp = ["mcp>=2.0,<3"]
+# The voice bridge. py-cord rather than discord.py because receiving voice
+# is not part of discord.py's supported API; both install as `discord`, so
+# they must not share an environment.
+voice = ["mcp>=2.0,<3", "websockets>=12", "py-cord>=2.6"]
 dev = ["pytest>=8.0"]
 
 [project.scripts]

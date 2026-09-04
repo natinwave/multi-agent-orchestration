@@ -159,3 +159,20 @@ def test_no_agent_identity_can_be_overwritten_by_a_grant() -> None:
     from orchestrator.credentials import RESERVED
 
     assert set(SECRET_ENV.values()) <= RESERVED
+
+
+def test_the_voice_identity_cannot_be_granted_over() -> None:
+    """The voice bridge holds the OpenAI and Discord credentials. A grant
+    that overwrote them would break the thing doing the granting."""
+    from orchestrator.credentials import RESERVED
+
+    assert {"openai_api_key", "discord_bot_token"} <= RESERVED
+
+
+def test_voice_secrets_are_a_separate_identity_from_the_agents() -> None:
+    """The coding agents must not see the OpenAI key, and the voice bridge
+    must not see their Claude token. Separate directories, as ever."""
+    bootstrap = (Path(__file__).resolve().parents[1] / "scripts" / "bootstrap.sh").read_text()
+    assert "write_secret voice openai_api_key" in bootstrap
+    assert "write_secret voice discord_bot_token" in bootstrap
+    assert "write_secret claude-code openai_api_key" not in bootstrap

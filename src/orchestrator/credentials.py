@@ -47,7 +47,9 @@ __all__ = [
 # Written by bootstrap and owned by the agent's identity, not by a grant.
 # A grant may not overwrite these: doing so would replace the agent's own
 # Claude credential with something else.
-RESERVED = frozenset({"oauth_token", "anthropic_api_key", "github_token"})
+RESERVED = frozenset(
+    {"oauth_token", "anthropic_api_key", "github_token", "openai_api_key", "discord_bot_token"}
+)
 
 # A granted file becomes an environment variable, so its name has to be a
 # valid identifier.
