@@ -2,7 +2,7 @@
 name = "orchestrator"
 version = "0.1.0"
 description = "Host-side supervisor for containerised coding agents"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 # The core supervisor is deliberately stdlib-only: tomllib, subprocess, json,
 # re. Ubuntu 24.04 ships Python 3.12, so bootstrap installs nothing to run it.
 dependencies = []

@@ -141,3 +141,21 @@ def test_the_container_runs_as_a_non_root_user() -> None:
 
 def test_workspace_volume_exists() -> None:
     assert 'VOLUME ["/workspace"]' in DOCKERFILE
+
+
+def test_either_claude_credential_is_accepted() -> None:
+    """A subscription token needs a human at a terminal; an API key does
+    not. The container must start from either."""
+    from orchestrator.backends.container import SECRET_ENV
+
+    assert SECRET_ENV["CLAUDE_CODE_OAUTH_TOKEN"] == "oauth_token"
+    assert SECRET_ENV["ANTHROPIC_API_KEY"] == "anthropic_api_key"
+
+
+def test_no_agent_identity_can_be_overwritten_by_a_grant() -> None:
+    """Every credential the container maps to a fixed environment name is
+    the agent's own identity, so a grant must not be able to replace it."""
+    from orchestrator.backends.container import SECRET_ENV
+    from orchestrator.credentials import RESERVED
+
+    assert set(SECRET_ENV.values()) <= RESERVED

@@ -17,7 +17,6 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 ORCH_ROOT="${ORCH_ROOT:-/srv/orchestration}"
 MIN_DISK_GB="${MIN_DISK_GB:-40}"
-MIN_VRAM_MB="${MIN_VRAM_MB:-8000}"
 
 echo "orchestration preflight -- $(date -u '+%Y-%m-%d %H:%M UTC') on $(hostname)"
 echo
@@ -35,9 +34,11 @@ fi
 if [ -r /etc/os-release ]; then
   # shellcheck disable=SC1091  # provided by the distro, not this repo
   . /etc/os-release
+  # 22.04 and 24.04 both work. What actually matters is checked below, one
+  # capability at a time, rather than inferred from a version number.
   case "${VERSION_ID:-}" in
-    24.04) pass "${PRETTY_NAME:-unknown distro}" ;;
-    *)     warn "${PRETTY_NAME:-unknown distro} -- built for Ubuntu 24.04" ;;
+    24.04|22.04) pass "${PRETTY_NAME:-unknown distro}" ;;
+    *)           warn "${PRETTY_NAME:-unknown distro} -- tested on Ubuntu 22.04 and 24.04" ;;
   esac
 fi
 
@@ -93,35 +94,84 @@ fi
 
 # --- gpu -------------------------------------------------------------------
 
+# Reported, not judged. A local model that is already loaded is SUPPOSED to
+# be holding most of the VRAM -- treating that as a problem had this warning
+# firing precisely when hermes was healthy. What matters is whether the
+# endpoint answers, which is checked below.
 if have nvidia-smi; then
   vram_free="$(nvidia-smi --query-gpu=memory.free --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -dc '0-9')"
+  vram_total="$(nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>/dev/null | head -1 | tr -dc '0-9')"
   gpu_name="$(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null | head -1 | clip)"
-  if [ -z "$vram_free" ]; then
-    warn "nvidia-smi present but reported no GPU"
-  elif [ "$vram_free" -ge "$MIN_VRAM_MB" ]; then
-    pass "gpu: ${gpu_name}, ${vram_free}MiB VRAM free (want ${MIN_VRAM_MB})"
+  if [ -n "$vram_free" ]; then
+    pass "gpu: ${gpu_name} (${vram_free}MiB of ${vram_total}MiB VRAM free)"
   else
-    warn "gpu: ${gpu_name}, only ${vram_free}MiB VRAM free (want ${MIN_VRAM_MB}) -- hermes may not load"
+    warn "nvidia-smi present but reported no GPU"
   fi
 else
-  warn "nvidia-smi not found -- no local GPU model, hermes will be unavailable"
+  info "no nvidia-smi -- fine unless you expect a local GPU model here"
+fi
+
+# The real question for a local-model agent: is anything answering?
+if have python3; then
+  endpoints="$(python3 - "$HERE/config/agents.toml" <<'PYEOF' 2>/dev/null
+import sys, tomllib
+try:
+    with open(sys.argv[1], "rb") as fh:
+        cfg = tomllib.load(fh)
+except Exception:
+    raise SystemExit(0)
+for name, spec in cfg.get("agents", {}).items():
+    if spec.get("type") == "http_openai" and spec.get("base_url"):
+        print(f"{name}\t{spec['base_url']}")
+PYEOF
+)"
+  while IFS="$(printf '\t')" read -r agent url; do
+    [ -n "${agent:-}" ] || continue
+    if python3 - "$url" <<'PYEOF' 2>/dev/null
+import socket, sys, urllib.parse
+u = urllib.parse.urlparse(sys.argv[1])
+port = u.port or (443 if u.scheme == "https" else 80)
+with socket.create_connection((u.hostname, port), timeout=3):
+    pass
+PYEOF
+    then
+      pass "agent ${agent}: something is listening at ${url}"
+    else
+      warn "agent ${agent}: nothing listening at ${url} -- jobs for it will fail"
+    fi
+  done <<EOF
+${endpoints}
+EOF
 fi
 
 # --- toolchain -------------------------------------------------------------
 
 if have git; then
   git_v="$(git --version | awk '{print $3}')"
-  pass "git ${git_v}"
+  git_major="${git_v%%.*}"; git_minor="$(printf '%s' "$git_v" | cut -d. -f2)"
+  if [ "$git_major" -gt 2 ] 2>/dev/null || { [ "$git_major" = 2 ] && [ "$git_minor" -ge 20 ] 2>/dev/null; }; then
+    pass "git ${git_v}"
+    # --relative-paths worktrees arrived in 2.48. Below that the container
+    # bind MUST use the identical path, which is what compose does.
+    if [ "$git_minor" -lt 48 ] 2>/dev/null && [ "$git_major" = 2 ]; then
+      info "git < 2.48: worktrees need the identical-path bind (compose already does this)"
+    fi
+  else
+    fail "git ${git_v} -- 2.20 or newer required for worktree handling"
+  fi
 else
   fail "git not installed"
 fi
 
 if have python3; then
   py_v="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)"
-  if python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 12) else 1)' 2>/dev/null; then
+  # 3.11 is the real floor: tomllib, StrEnum and datetime.UTC all arrive
+  # there. Verified by running the suite under 3.11 and 3.10 -- 3.10 fails
+  # on datetime.UTC and nothing else.
+  if python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 11) else 1)' 2>/dev/null; then
     pass "python ${py_v}"
   else
-    fail "python ${py_v} -- 3.12 or newer required (tomllib, StrEnum)"
+    fail "python ${py_v} -- 3.11 or newer required (tomllib, StrEnum, datetime.UTC)"
   fi
 
   # Ubuntu ships venv as a separate package, and without it bootstrap fails
@@ -144,14 +194,16 @@ if have gh; then
   fi
 else
   warn "gh not installed -- agents will not be able to open pull requests"
+  info "install: https://github.com/cli/cli/blob/trunk/docs/install_linux.md"
 fi
 
 if have op; then
   if op whoami >/dev/null 2>&1; then
     pass "1Password CLI signed in"
   else
-    fail "1Password CLI installed but not signed in -- run: eval \$(op signin)"
-    info "bootstrap needs it to materialise credentials; it holds no secrets itself"
+    fail "1Password CLI installed but not authenticated"
+    info "headless: put a service account token at ~/.op-token (bootstrap finds it)"
+    info "interactive: eval \$(op signin)"
   fi
 else
   fail "1Password CLI (op) not installed -- secrets are op:// references only"
@@ -163,6 +215,7 @@ if have claude; then
   pass "claude code installed ($(claude --version 2>&1 | clip))"
 
   token_source=""
+  [ -n "${ANTHROPIC_API_KEY:-}" ] && token_source="ANTHROPIC_API_KEY"
   [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && token_source="environment"
   [ -z "$token_source" ] && [ -r "${ORCH_SECRETS:-/run/orchestration/secrets}/claude-code/oauth_token" ] \
     && token_source="secrets file"
@@ -178,11 +231,14 @@ if have claude; then
       fail "claude did not answer: $(printf '%s' "$out" | clip)"
     fi
   else
-    fail "no CLAUDE_CODE_OAUTH_TOKEN -- containers will hang on the onboarding wizard"
-    info "A HUMAN MUST RUN 'claude setup-token' WHILE SITTING AT THIS MACHINE."
-    info "It is interactive: it cannot be done over chat, by an agent, or over ssh"
-    info "without a terminal. Then store the token in 1Password as the op:// ref"
-    info "in .env.example, and re-run this script."
+    fail "no Claude credential -- containers will hang on the onboarding wizard"
+    info "Two ways to fix, both needing a person once:"
+    info "  1. 'claude setup-token' at ANY terminal you are logged into -- your"
+    info "     laptop is fine, it does not have to be this machine. It is"
+    info "     interactive, so no agent and no chat relay can do it. Put the"
+    info "     result in 1Password under the op:// ref in .env.example."
+    info "  2. Or set ANTHROPIC_API_KEY instead: bills per token, needs nobody"
+    info "     at a keyboard, and keeps a subscription token off an always-on box."
   fi
 else
   fail "claude code not installed (npm install -g @anthropic-ai/claude-code)"

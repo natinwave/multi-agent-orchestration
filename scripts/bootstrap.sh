@@ -146,7 +146,7 @@ secrets_step() {
   if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] \
      && [ -r "${HERE}/.env" ] && have op; then
     if resolved="$(op run --env-file="${HERE}/.env" --no-masking -- env 2>>"$LOG")"; then
-      for var in CLAUDE_CODE_OAUTH_TOKEN GH_TOKEN HERMES_API_KEY; do
+      for var in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY GH_TOKEN HERMES_API_KEY; do
         value="$(printf '%s\n' "$resolved" | sed -n "s/^${var}=//p" | head -1)"
         [ -n "$value" ] && export "${var}=${value}"
       done
@@ -162,6 +162,11 @@ secrets_step() {
   elif [ -r "${ORCH_SECRETS}/claude-code/oauth_token" ]; then
     kept=$((kept + 1))
   fi
+  if write_secret claude-code anthropic_api_key "${ANTHROPIC_API_KEY:-}"; then
+    written=$((written + 1))
+  elif [ -r "${ORCH_SECRETS}/claude-code/anthropic_api_key" ]; then
+    kept=$((kept + 1))
+  fi
   if write_secret claude-code github_token "${GH_TOKEN:-}"; then
     written=$((written + 1))
   elif [ -r "${ORCH_SECRETS}/claude-code/github_token" ]; then
@@ -173,13 +178,14 @@ secrets_step() {
     kept=$((kept + 1))
   fi
 
-  if [ -r "${ORCH_SECRETS}/claude-code/oauth_token" ]; then
+  if [ -r "${ORCH_SECRETS}/claude-code/oauth_token" ] \
+     || [ -r "${ORCH_SECRETS}/claude-code/anthropic_api_key" ]; then
     pass "secrets in place (${written} written, ${kept} already present)"
   else
-    fail "no claude-code oauth token at ${ORCH_SECRETS}/claude-code/oauth_token"
-    info "run: op run --env-file=.env -- ./scripts/bootstrap.sh"
-    info "the token itself comes from 'claude setup-token', which a human must"
-    info "run at this machine -- see README, 'What remains manual'"
+    fail "no Claude credential in ${ORCH_SECRETS}/claude-code/"
+    info "expected oauth_token (from 'claude setup-token', which a human must run"
+    info "at a terminal) or anthropic_api_key. Put one in the Agent vault under"
+    info "the reference in .env.example, then re-run."
   fi
 }
 secrets_step

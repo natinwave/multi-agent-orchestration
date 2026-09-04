@@ -29,6 +29,10 @@ __all__ = ["ContainerBackend"]
 # later is exported under its own uppercased filename.
 SECRET_ENV = {
     "CLAUDE_CODE_OAUTH_TOKEN": "oauth_token",
+    # Either credential satisfies Claude Code. An API key bills per token
+    # and needs nobody at a keyboard, which is the easier story for a box
+    # you are not sitting at.
+    "ANTHROPIC_API_KEY": "anthropic_api_key",
     "GH_TOKEN": "github_token",
 }
 
@@ -151,8 +155,8 @@ class ContainerBackend:
             'if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -z "${ANTHROPIC_API_KEY:-}" ]; then'
         )
         lines.append(
-            '  echo "[supervisor] no credential at /run/secrets/oauth_token -- '
-            'run claude setup-token on the host, see README" >&2; exit 78; fi'
+            '  echo "[supervisor] no Claude credential in /run/secrets -- expected '
+            'oauth_token or anthropic_api_key; see README" >&2; exit 78; fi'
         )
 
         argv = list(agent.command)

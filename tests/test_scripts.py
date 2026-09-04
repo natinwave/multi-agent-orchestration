@@ -82,10 +82,12 @@ def test_preflight_checks_everything_the_brief_asked_for() -> None:
 
 def test_preflight_says_setup_token_cannot_be_done_remotely() -> None:
     """The one failure that no amount of retrying from a chat relay can
-    fix, so it has to be stated rather than implied."""
+    fix, so it has to be stated rather than implied -- and it has to name
+    the alternative that needs nobody at a keyboard."""
     assert "setup-token" in PREFLIGHT
     assert re.search(r"(?i)interactive", PREFLIGHT)
-    assert re.search(r"(?i)human must run", PREFLIGHT)
+    assert re.search(r"(?i)no agent and no chat relay", PREFLIGHT)
+    assert "ANTHROPIC_API_KEY" in PREFLIGHT
 
 
 def test_preflight_emits_one_summary_line() -> None:

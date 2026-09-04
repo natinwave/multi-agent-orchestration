@@ -2,6 +2,7 @@
 config loudly on the host -- and about the colloquial repo matching, which
 is the only real logic in here."""
 
+import re
 from pathlib import Path
 
 import pytest
@@ -243,3 +244,19 @@ def test_repo_slug_from_the_clone_url_is_matchable(cfg) -> None:
     """People say the real repository name, not the short registry key."""
     assert cfg.resolve_repo("kiln controller", cfg.agents["hermes"]).name == "kiln"
     assert cfg.resolve_repo("provision ledger", cfg.agents["hermes"]).name == "ledger"
+
+
+def test_shipped_repos_use_https_not_ssh() -> None:
+    """The orchestration host has no SSH key, and giving it one would be a
+    credential to manage outside 1Password. Private repos use GH_TOKEN."""
+    for repo in load().repos.values():
+        assert repo.url.startswith("https://"), f"{repo.name} would need an SSH key"
+
+
+def test_env_example_points_at_a_vault_that_exists() -> None:
+    """The refs must name the Agent vault -- pointing at a vault the
+    account does not have kills bootstrap before it starts."""
+    text = (Path(__file__).resolve().parents[1] / ".env.example").read_text()
+    refs = re.findall(r"op://([^/]+)/", text)
+    assert refs, "no op:// references found"
+    assert set(refs) == {"Agent"}, f"unexpected vaults: {sorted(set(refs))}"

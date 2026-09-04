@@ -21,7 +21,8 @@ them out loud.
 
 ## Where this runs
 
-**On an Ubuntu 24.04 desktop with native Docker.** Not on a Mac.
+**On an Ubuntu desktop with native Docker** — 22.04 and 24.04 both work.
+Not on a Mac.
 
 That is not a preference. Several load-bearing behaviours differ or vanish
 under Docker Desktop on macOS: bind-mount UID passthrough, identical-path
@@ -274,8 +275,9 @@ questions need no checkout.
 ### Why the identical-path bind
 
 A git worktree stores an **absolute** path back to the main clone's `.git`.
-Git 2.48 added `worktree --relative-paths`; **Ubuntu 24.04 ships git
-2.43**. So `/srv/orchestration` is bind-mounted into the container at
+Git 2.48 added `worktree --relative-paths`; Ubuntu 24.04 ships 2.43 and
+22.04 ships 2.34, so **neither has it**. `/srv/orchestration` is
+bind-mounted into the container at
 `/srv/orchestration` — the same string — and worktrees resolve. Change the
 root in `config/orchestrator.toml` and you must change
 `docker-compose.yml` to match. `bootstrap.sh` verifies this rather than
@@ -303,12 +305,13 @@ which is usually the UID we want — the Dockerfile removes it first.
 On the Ubuntu host:
 
 ```sh
-git clone git@github.com:natinwave/multi-agent-orchestration.git
+git clone https://github.com/natinwave/multi-agent-orchestration.git
 cd multi-agent-orchestration
+cp .env.example .env                    # references only; .env is gitignored
 
 ./scripts/preflight.sh                  # changes nothing; relay the output
 
-op run --env-file=.env -- ./scripts/bootstrap.sh --selftest
+./scripts/bootstrap.sh --selftest       # finds ~/.op-token by itself
 
 ./bin/orchestrate ask claude-code "fix the failing parser test"
 # kestrel  started on claude-code in main (job/kestrel)
@@ -421,7 +424,7 @@ about any of it:
 What *is* covered off-host, and is worth running before you push:
 
 ```sh
-.venv/bin/python -m pytest -q          # 322 tests
+.venv/bin/python -m pytest -q          # 327 tests
 ./scripts/check-no-secrets.sh
 docker compose -f docker/docker-compose.yml config     # schema only
 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \
@@ -439,15 +442,24 @@ end-to-end `ask` → detached runner → `check` against a stub model server.
 
 Four things, and the first one is the one that bites:
 
-1. **`claude setup-token`.** Claude Code's onboarding wizard appears in
-   containers even with valid credentials, and will sit there waiting for a
-   keypress forever. The workaround is a long-lived token passed in as
-   `CLAUDE_CODE_OAUTH_TOKEN` — but `setup-token` is interactive, so **it
-   cannot be run over chat, by an agent, or over ssh without a terminal.**
-   A human has to be at the machine. `preflight.sh` detects its absence and
-   says so plainly rather than failing sideways. Store the result in
-   1Password under the reference in `.env.example`.
-2. **`op signin`** on the host, so bootstrap can read the vault.
+1. **A Claude credential**, one of two ways:
+
+   - `claude setup-token` produces a long-lived subscription token. The
+     onboarding wizard otherwise appears in containers even with valid
+     credentials and waits for a keypress forever, which is what this
+     avoids. It is interactive, so **it cannot be run over chat, by an
+     agent, or over ssh without a terminal** — a human has to be at a
+     terminal, though not necessarily *this* machine. Store the result in
+     1Password under the reference in `.env.example`.
+   - `ANTHROPIC_API_KEY` bills per token and needs nobody at a keyboard.
+     For an always-on box this is the simpler story, and it keeps a
+     subscription token off a machine that runs unattended.
+
+   Either satisfies the container. `preflight.sh` says which, if any, it
+   found rather than failing sideways.
+2. **A 1Password service account token** on the host, at `~/.op-token`.
+   bootstrap finds it on its own and resolves `.env` without an `op run`
+   wrapper.
 3. **`gh auth login`**, if you want agents opening pull requests.
 4. **The hermes endpoint.** `base_url` in `config/agents.toml` is a
    placeholder port. Point it at the real server; nothing else changes.

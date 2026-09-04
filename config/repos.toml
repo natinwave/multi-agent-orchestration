@@ -7,14 +7,18 @@
 #
 # A job with no repo is not an error: it gets a scratch directory instead of
 # a worktree. Plenty of questions need no checkout at all.
+#
+# HTTPS rather than SSH: the orchestration host has no SSH key, and giving
+# it one would be a second credential to manage outside 1Password. Private
+# repos are reached with GH_TOKEN instead.
 
 [repos.main]
-url = "git@github.com:natinwave/multi-agent-orchestration.git"
+url = "https://github.com/natinwave/multi-agent-orchestration.git"
 base_ref = "main"
 aliases = ["orchestration", "the orchestrator", "this repo", "multi agent"]
 
 # Examples, edit or delete. bootstrap.sh clones whatever is listed here.
 # [repos.kiln]
-# url = "git@github.com:natinwave/kiln-controller.git"
+# url = "https://github.com/natinwave/kiln-controller.git"
 # base_ref = "main"
 # aliases = ["kiln", "the kiln one", "kiln controller", "pottery"]
