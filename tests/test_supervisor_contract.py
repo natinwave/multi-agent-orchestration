@@ -457,3 +457,40 @@ def test_a_finished_job_releases_its_scoped_grant(sup_with_vault: Supervisor) ->
     sup_with_vault.grant("hermes", "staging", job_id=job_id)
     wait_for_terminal(sup_with_vault, job_id)
     assert sup_with_vault.list_grants()["grants"] == []
+
+
+def test_every_identity_under_the_secrets_root_is_registered(tmp_path: Path) -> None:
+    """The voice bridge is an identity without being an agent. Iterating
+    the agent list left its Discord token and OpenAI key unregistered --
+    on the one path that ends in audio."""
+    cfg_dir = tmp_path / "config"
+    cfg_dir.mkdir()
+    (cfg_dir / "agents.toml").write_text(
+        '[agents.hermes]\ntype = "http_openai"\nbase_url = "http://x/v1"\nmodel = "m"\n'
+    )
+    (cfg_dir / "repos.toml").write_text('[repos.main]\nurl = "https://h/o/m.git"\n')
+    secrets = tmp_path / "secrets"
+    (secrets / "voice").mkdir(parents=True)
+    (secrets / "voice" / "discord_bot_token").write_text("discord-bot-token-value-here")
+    (secrets / "voice" / "openai_api_key").write_text("openai-key-value-here")
+    (cfg_dir / "orchestrator.toml").write_text(
+        f'[paths]\nroot = "{tmp_path / "srv"}"\n'
+        f'[credentials]\nsecrets_root = "{secrets}"\n'
+    )
+
+    sup = Supervisor.create(config=load(cfg_dir, tmp_path / "srv"), environ={})
+    scrubbed = sup.redactor.scrub(
+        "bot=discord-bot-token-value-here key=openai-key-value-here"
+    )
+    assert "discord-bot-token-value-here" not in scrubbed
+    assert "openai-key-value-here" not in scrubbed
+
+
+def test_the_voice_credentials_are_in_the_scrub_env_list() -> None:
+    """Belt and braces: registered from the files, and by name from the
+    environment for a process started under `op run`."""
+    from orchestrator.registry import load as load_shipped
+
+    scrub = load_shipped().scrub_env
+    assert "OPENAI_API_KEY" in scrub
+    assert "DISCORD_BOT_TOKEN" in scrub

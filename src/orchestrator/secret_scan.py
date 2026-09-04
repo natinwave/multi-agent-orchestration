@@ -34,12 +34,16 @@ OP_PLACEHOLDER = "op-ref"
 # stay quiet enough that people keep running it.
 SELF_ASSIGNMENT = re.compile(r"\b(\w+)(\s*[:=]\s*)\1\b")
 
-# In Python source, `api_key=openai_key` is a keyword argument, not a leak.
-# This is sound rather than heuristic: a literal secret in Python has to be
-# quoted or it is a NameError, so an UNQUOTED right-hand side is always an
-# expression. Quoted values are still scanned, so a real `TOKEN = "sk-..."`
-# is still caught.
-PY_EXPRESSION_RHS = re.compile(r"([:=]\s*)([A-Za-z_][A-Za-z0-9_.]*)\b(?!\s*['\"])")
+# In Python source, only a quoted string can hold a secret -- anything
+# unquoted is an expression, or it would be a NameError. So .py lines are
+# scanned by their string literals rather than whole: `api_key=openai_key`
+# and `token = read_secret(root, "discord_bot_token")` are code, while
+# `TOKEN = "ghp_..."` still has its literal examined and still trips.
+#
+# This is sound rather than heuristic, which is why it is worth doing: it
+# removes a whole class of false positive without removing any real
+# finding.
+PY_STRING = re.compile(r"""(['"])(?:\\.|(?!\1).)*\1""", re.DOTALL)
 
 # Some files must contain credential-shaped text to do their job: the
 # redaction module documents every shape it matches, and the tests plant
@@ -74,7 +78,7 @@ def scan(paths: list[Path], redactor: Redactor | None = None, exempt=frozenset()
             probe = OP_REFERENCE.sub(OP_PLACEHOLDER, raw)
             probe = SELF_ASSIGNMENT.sub(r"k\g<2>v", probe)
             if path.suffix == ".py":
-                probe = PY_EXPRESSION_RHS.sub(r"\g<1>v", probe)
+                probe = " ".join(m.group(0) for m in PY_STRING.finditer(probe))
             if red.scrub(probe) != probe:
                 findings.append(Finding(path, number, raw.strip()[:MAX_SNIPPET]))
     return findings

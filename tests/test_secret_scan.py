@@ -111,3 +111,24 @@ def test_the_python_exemption_does_not_apply_to_shell(tmp_path: Path) -> None:
     f = tmp_path / "x.sh"
     f.write_text("export API_KEY=abcdefghijklmnopqrstuvwx\n")
     assert scan([f]) != []
+
+
+def test_python_call_expressions_are_not_findings(tmp_path: Path) -> None:
+    """`token = read_secret(root, "discord_bot_token")` names a file, not a
+    value."""
+    f = tmp_path / "m.py"
+    f.write_text('token = read_secret(secrets_root, "discord_bot_token")\n')
+    assert scan([f]) == []
+
+
+def test_a_secret_inside_a_python_call_is_still_caught(tmp_path: Path) -> None:
+    """Scanning only the string literals must not mean skipping them."""
+    f = tmp_path / "m.py"
+    f.write_text('client = Thing(key="ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789")\n')
+    assert [x.line for x in scan([f])] == [1]
+
+
+def test_a_secret_in_a_python_dict_is_still_caught(tmp_path: Path) -> None:
+    f = tmp_path / "m.py"
+    f.write_text('CONFIG = {"token": "ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789"}\n')
+    assert [x.line for x in scan([f])] == [1]

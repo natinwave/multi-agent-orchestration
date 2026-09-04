@@ -65,10 +65,25 @@ class Supervisor:
             entropy_fallback=config.entropy_fallback,
         )
         # Two sources of literal secrets: the environment this process was
-        # started with (likely under `op run`), and the per-agent secret
-        # files bootstrap materialised. Registering both means a token that
-        # leaks into a log is scrubbed by value, not just by shape.
+        # started with (likely under `op run`), and the secret files
+        # bootstrap materialised. Registering both means a token that leaks
+        # into a log is scrubbed by value, not merely by shape.
         redactor.register_env(config.scrub_env, os.environ if environ is None else environ)
+
+        # Every identity under the secrets root, not just the ones listed as
+        # agents. The voice bridge is an identity without being an agent,
+        # and iterating agents left its OpenAI key and Discord bot token
+        # unregistered -- protected only by pattern, on the one path that
+        # ends in something being said out loud.
+        redactor.register_dir(config.secrets_root)
+        try:
+            identities = sorted(p for p in config.secrets_root.iterdir() if p.is_dir())
+        except OSError:
+            identities = []
+        for identity in identities:
+            redactor.register_dir(identity)
+
+        # Anything configured explicitly elsewhere still counts.
         for agent in config.agents.values():
             if agent.secrets_dir:
                 redactor.register_dir(Path(agent.secrets_dir))

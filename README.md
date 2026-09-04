@@ -437,7 +437,7 @@ about any of it:
 What *is* covered off-host, and is worth running before you push:
 
 ```sh
-.venv/bin/python -m pytest -q          # 416 tests
+.venv/bin/python -m pytest -q          # 428 tests
 ./scripts/check-no-secrets.sh
 docker compose -f docker/docker-compose.yml config     # schema only
 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \
@@ -511,8 +511,36 @@ is a microphone and a speaker.
 
 Discord rather than a web page because **the phone should be able to be in
 a pocket.** A browser tab needs the screen on and the page in front; a
-native app has background-audio privileges and push notifications. The
-trade is that Discord is in the audio path.
+native app has background-audio privileges and push notifications.
+
+### Discord voice receive is an unsupported surface
+
+Worth being clear-eyed about: **Discord has never officially supported
+receiving voice.** py-cord's recording support reads a surface Discord does
+not document, has broken before, and is actively changing — their
+end-to-end encrypted voice protocol is exactly the kind of change that
+ends it.
+
+For one person's own bot that is an acceptable trade, because nothing else
+gives you push-to-talk from a pocket this cheaply. But it is a trade with a
+known failure mode, so the seam is real rather than notional: a transport
+owns its own audio formats and hands the session 24 kHz mono PCM16, and
+nothing above `voice/transport/` knows Discord exists. A test enforces
+that.
+
+If receive breaks, two replacements are already identified:
+
+- **SIP.** The Realtime API accepts calls over SIP directly — point a trunk
+  at `sip:$PROJECT_ID@sip.api.openai.com;transport=tls` and accept the call
+  from a webhook. A real phone number, on a supported API, working with no
+  data connection at all. The costs are per-minute billing and a publicly
+  reachable webhook, which this design has so far avoided needing.
+- **A WebSocket page over Tailscale.** No third party in the audio path,
+  but a browser tab needs the screen on — which is why Discord won.
+
+Either is one file in `voice/transport/`. `LoopbackTransport` is a third,
+used by the tests, which is how the session is exercised end to end without
+Discord, a bot token, or a microphone.
 
 ### Setup
 

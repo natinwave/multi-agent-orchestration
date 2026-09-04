@@ -29,6 +29,10 @@ scrub_env = [
   "GITHUB_TOKEN",
   "HERMES_API_KEY",
   "OP_SERVICE_ACCOUNT_TOKEN",
+  # The voice bridge's own identity. Narration now ends up being spoken
+  # aloud over Discord, so this filter has one more destination to protect.
+  "OPENAI_API_KEY",
+  "DISCORD_BOT_TOKEN",
 ]
 
 [credentials]
