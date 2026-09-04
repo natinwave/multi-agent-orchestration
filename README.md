@@ -492,6 +492,82 @@ Four things, and the first one is the one that bites:
   across arbitrary wrapping would produce constant false positives; layers
   2 and 3 still see each fragment.
 
-## Out of scope for phase one
+## The voice layer
 
-No voice layer, no TTS/STT, no ElevenLabs, no Realtime API.
+Phase two. A Discord bot on this host carries audio between your phone and
+`gpt-realtime`, which calls the supervisor's tools.
+
+```
+phone (Discord app, anywhere)
+   |  voice channel
+Discord  <->  bot on this host  <->  gpt-realtime
+                    |
+             in-process MCP -> supervisor -> agents
+```
+
+The session lives on the host, not the phone. That keeps the MCP server on
+stdio with no port open, and means there is no app to maintain — your phone
+is a microphone and a speaker.
+
+Discord rather than a web page because **the phone should be able to be in
+a pocket.** A browser tab needs the screen on and the page in front; a
+native app has background-audio privileges and push notifications. The
+trade is that Discord is in the audio path.
+
+### Setup
+
+Two more items in the `Agent` vault — `OpenAI API Key` and
+`Discord Bot Token` — then set the channel id in `config/voice.toml`:
+
+```sh
+pip install -e '.[voice]'
+./scripts/bootstrap.sh          # materialises the voice identity
+python -m orchestrator.voice
+```
+
+The bridge is **its own identity**: the coding agents never see the OpenAI
+key, and it never sees their Claude token. Same per-directory scoping as
+everything else.
+
+### What is enforced rather than prompted
+
+You chose to let it start jobs freely but confirm every credential. A
+prompt is not a control, so `GrantGuard` makes the **first** call to
+`grant` never grant anything — it returns the sentence to say and waits for
+an identical call within two minutes. Confirming staging for `hermes` does
+not release production, or the same key to a different agent, and an
+approval is consumed rather than reusable.
+
+`revoke` is deliberately *not* gated. Withdrawing access is the safe
+direction and is the one thing you might need in a hurry.
+
+### Audio
+
+Discord is 48 kHz stereo, the API is 24 kHz mono. The exact 2:1 ratio makes
+this arithmetic rather than a dependency — written against `array` because
+`audioop` is removed in 3.13. Both converters carry remainders at the byte
+level; dropping an odd trailing byte would shift every later sample and
+turn the rest of the call into noise.
+
+Barge-in cancels generation **and** drops buffered playback. Cancelling
+alone leaves a second of speech still queued over the person interrupting,
+which is the thing that makes a voice assistant infuriating.
+
+### What cannot be tested off the host
+
+The Discord glue and the WebSocket transport need a bot token, a server and
+a live key, so `discord_bot.py` is deliberately thin. Everything decidable
+offline is covered: audio conversion, the playback buffer, the grant guard,
+tool dispatch, and the realtime event loop — `handle_event` takes a plain
+dictionary precisely so it can be driven without a socket.
+
+`protocol.py` holds every wire constant in one place. It was checked against
+the current docs rather than memory, which corrected three things: the model
+is `gpt-realtime-2.1`, audio deltas are `response.output_audio.delta`, and
+the `OpenAI-Beta` header is dropped at GA. When something breaks after an
+API change, read that file first.
+
+## Out of scope
+
+No TTS/STT pipeline and no ElevenLabs: `gpt-realtime` is speech-to-speech,
+so there is nothing to stitch together.
