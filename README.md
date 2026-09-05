@@ -542,6 +542,28 @@ Either is one file in `voice/transport/`. `LoopbackTransport` is a third,
 used by the tests, which is how the session is exercised end to end without
 Discord, a bot token, or a microphone.
 
+### Setting up the Discord bot
+
+In the Developer Portal, create an application, then:
+
+| Setting | Value | Why |
+|---|---|---|
+| Installation → **Guild Install** | on | A user-installed app has no bot member in the server, and joining a voice channel needs one. User Install can stay off. |
+| Bot → Privileged intents | **all off** | The bot never reads messages. `Intents.default()` already covers voice states, which is not privileged. |
+| Bot → Public bot | off | Nobody else should be able to add it. |
+| OAuth2 → URL Generator → scope | `bot` | |
+| OAuth2 → URL Generator → permissions | View Channel, Connect, Speak | The minimum to join and be heard. |
+
+Open the generated URL, pick your server. Then turn on Developer Mode
+(Settings → Advanced), right-click the voice channel, Copy Channel ID, and
+put it in `config/voice.toml`.
+
+Two things that commonly go wrong. The bot needs **View Channel on that
+specific channel**, not only server-wide — a private channel with category
+overrides fails silently, so the code logs exactly that case. And only
+**py-cord** may be installed: `discord.py` also installs as `discord`, and
+the adapter raises a clear error if it finds the wrong one.
+
 ### Setup
 
 Two more items in the `Agent` vault — `OpenAI API Key` and
@@ -549,9 +571,15 @@ Two more items in the `Agent` vault — `OpenAI API Key` and
 
 ```sh
 pip install -e '.[voice]'
-./scripts/bootstrap.sh          # materialises the voice identity
-python -m orchestrator.voice
+./scripts/bootstrap.sh                          # materialises the voice identity
+
+python -m orchestrator.voice --transport loopback   # credentials + API only
+python -m orchestrator.voice                        # the real thing
 ```
+
+Run the loopback transport first. It checks the credentials and the
+Realtime connection with Discord entirely out of the picture, so if
+something is wrong you know which half it is.
 
 The bridge is **its own identity**: the coding agents never see the OpenAI
 key, and it never sees their Claude token. Same per-directory scoping as
