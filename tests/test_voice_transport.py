@@ -117,3 +117,32 @@ def test_nothing_outside_the_transport_package_imports_discord() -> None:
         text = path.read_text()
         assert "import discord" not in text, path
         assert "DiscordTransport" not in text or path.name == "__main__.py", path
+
+
+def test_a_missing_channel_id_is_reported_not_crashed() -> None:
+    """discord_channel_id defaults to 0 in the template, which is falsy --
+    it must read as 'you have not set this' rather than channel zero."""
+    from orchestrator.voice.__main__ import build_transport
+    from pathlib import Path
+
+    transport, missing = build_transport("discord", {"discord_channel_id": 0}, Path("/nope"))
+    assert transport is None
+    assert any("discord_channel_id" in m for m in missing)
+
+
+def test_an_unknown_transport_is_named() -> None:
+    from orchestrator.voice.__main__ import build_transport
+    from pathlib import Path
+
+    transport, missing = build_transport("carrier-pigeon", {}, Path("/nope"))
+    assert transport is None
+    assert "carrier-pigeon" in missing[0]
+
+
+def test_loopback_needs_no_discord_config() -> None:
+    """So it can verify credentials with Discord entirely out of the way."""
+    from orchestrator.voice.__main__ import build_transport
+    from pathlib import Path
+
+    transport, missing = build_transport("loopback", {}, Path("/nope"))
+    assert transport is not None and missing == []

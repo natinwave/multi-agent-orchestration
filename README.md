@@ -437,7 +437,7 @@ about any of it:
 What *is* covered off-host, and is worth running before you push:
 
 ```sh
-.venv/bin/python -m pytest -q          # 428 tests
+.venv/bin/python -m pytest -q          # 431 tests
 ./scripts/check-no-secrets.sh
 docker compose -f docker/docker-compose.yml config     # schema only
 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \
@@ -556,7 +556,8 @@ In the Developer Portal, create an application, then:
 
 Open the generated URL, pick your server. Then turn on Developer Mode
 (Settings → Advanced), right-click the voice channel, Copy Channel ID, and
-put it in `config/voice.toml`.
+put it in `config/voice.toml` — the copy, not the `.example`, which stays
+tracked so your channel id never conflicts on a pull.
 
 Two things that commonly go wrong. The bot needs **View Channel on that
 specific channel**, not only server-wide — a private channel with category
@@ -570,11 +571,12 @@ Two more items in the `Agent` vault — `OpenAI API Key` and
 `Discord Bot Token` — then set the channel id in `config/voice.toml`:
 
 ```sh
-pip install -e '.[voice]'
-./scripts/bootstrap.sh                          # materialises the voice identity
+.venv/bin/pip install -e '.[voice]'
+cp config/voice.toml.example config/voice.toml   # then set discord_channel_id
+./scripts/bootstrap.sh                           # materialises the voice identity
 
-python -m orchestrator.voice --transport loopback   # credentials + API only
-python -m orchestrator.voice                        # the real thing
+./bin/orchestrate-voice --transport loopback     # credentials + API only
+./bin/orchestrate-voice                          # the real thing
 ```
 
 Run the loopback transport first. It checks the credentials and the

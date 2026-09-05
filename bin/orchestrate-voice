@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# The voice bridge. Joins the configured Discord voice channel and stays
+# connected until stopped.
+#
+#   ./bin/orchestrate-voice --transport loopback   # no Discord, checks creds
+#   ./bin/orchestrate-voice                        # the real thing
+set -euo pipefail
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+python="${here}/.venv/bin/python"
+[ -x "$python" ] || python="$(command -v python3)"
+PYTHONPATH="${here}/src${PYTHONPATH:+:$PYTHONPATH}" exec "$python" -m orchestrator.voice "$@"

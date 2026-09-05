@@ -1,5 +1,9 @@
 # The voice layer. Phase two: talk to your agents from anywhere.
 #
+#   cp config/voice.toml.example config/voice.toml
+#
+# The copy is gitignored, so your channel id never conflicts on a pull.
+#
 # Secrets are NOT here. openai_api_key and discord_bot_token are read from
 # /run/orchestration/secrets/voice/, materialised by bootstrap from the
 # references in .env -- the same path every other identity uses.

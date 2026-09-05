@@ -17,6 +17,10 @@ venv/
 build/
 dist/
 
+# Site-specific config. Copy the .example and edit the copy; the template
+# stays tracked so a pull never conflicts with your channel id.
+config/voice.toml
+
 # Runtime state lives in /srv/orchestration, never in the repo.
 # This entry only catches an accidental local run.
 srv/
