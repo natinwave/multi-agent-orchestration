@@ -80,7 +80,9 @@ def build_transport(name: str, voice_cfg: dict, secrets_root: Path):
     if name == "loopback":
         from .transport.loopback import LoopbackTransport
 
-        return LoopbackTransport(), []
+        # Stay up long enough to read the API's answer. Without this the
+        # check only proves the key was accepted, not the configuration.
+        return LoopbackTransport(linger=voice_cfg.get("loopback_seconds", 5.0)), []
 
     return None, [f"unknown transport: {name}"]
 
@@ -136,6 +138,17 @@ def main(argv: list[str] | None = None) -> int:
         asyncio.run(run(transport, session))
     except KeyboardInterrupt:
         log.info("call ended")
+        return 0
+
+    if args.transport == "loopback":
+        if session.configured.is_set():
+            log.info("loopback check passed: credentials and session configuration are good")
+            return 0
+        log.error(
+            "connected, but the API never acknowledged the session configuration -- "
+            "look for an error above; protocol.py holds every wire constant"
+        )
+        return 1
     return 0
 
 

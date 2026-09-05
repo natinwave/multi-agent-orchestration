@@ -146,3 +146,31 @@ def test_loopback_needs_no_discord_config() -> None:
 
     transport, missing = build_transport("loopback", {}, Path("/nope"))
     assert transport is not None and missing == []
+
+
+def test_loopback_lingers_so_server_events_can_arrive() -> None:
+    """Returning immediately closes the session before a single event is
+    read, so a rejected session.update looks exactly like a clean run."""
+    import time
+
+    from orchestrator.voice.transport.loopback import LoopbackTransport
+
+    class Dummy:
+        async def send_audio(self, pcm):
+            pass
+
+    t = LoopbackTransport(linger=0.05)
+    started = time.monotonic()
+    asyncio.run(t.run(Dummy()))
+    assert time.monotonic() - started >= 0.05
+    assert t.finished.is_set()
+
+
+def test_the_session_records_when_configuration_is_accepted() -> None:
+    """Connecting proves the key works. This proves the config does."""
+    from orchestrator.voice import protocol
+
+    session = RealtimeSession(api_key="k", server=FakeServer(), on_audio=LoopbackTransport().play)
+    assert not session.configured.is_set()
+    asyncio.run(session.handle_event({"type": protocol.SESSION_UPDATED}))
+    assert session.configured.is_set()

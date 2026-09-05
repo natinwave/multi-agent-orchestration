@@ -16,8 +16,13 @@ __all__ = ["LoopbackTransport"]
 class LoopbackTransport:
     """Feeds scripted audio in and records everything played back."""
 
-    def __init__(self, incoming: list[bytes] | None = None) -> None:
+    def __init__(self, incoming: list[bytes] | None = None, linger: float = 0.0) -> None:
         self.incoming = list(incoming or [])
+        # Seconds to stay connected after the scripted audio runs out.
+        # Returning immediately would close the session before a single
+        # server event had been read, so a rejected session.update would
+        # look identical to a clean run.
+        self.linger = linger
         self.played: list[bytes] = []
         self.interrupts = 0
         self.finished = asyncio.Event()
@@ -32,6 +37,8 @@ class LoopbackTransport:
     async def run(self, session) -> None:
         for chunk in self.incoming:
             await session.send_audio(chunk)
+        if self.linger:
+            await asyncio.sleep(self.linger)
         self.finished.set()
 
     @property

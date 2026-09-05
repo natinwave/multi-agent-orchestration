@@ -42,6 +42,8 @@ class RealtimeSession:
     voice: str = protocol.DEFAULT_VOICE
     extra_instructions: str | None = None
 
+    #: Set once the API acknowledges our session.update.
+    configured: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
     _ws: Any = field(default=None, repr=False)
     _dispatcher: ToolDispatcher | None = field(default=None, repr=False)
     _transcript: list[str] = field(default_factory=list, repr=False)
@@ -134,6 +136,16 @@ class RealtimeSession:
 
         elif kind == protocol.OUTPUT_TRANSCRIPT_DELTA:
             self._transcript.append(event.get("delta", ""))
+
+        elif kind == protocol.SESSION_CREATED:
+            log.info("session created by the API")
+
+        elif kind == protocol.SESSION_UPDATED:
+            # The API accepted our configuration -- model, voice, tools,
+            # audio format. Worth saying out loud: connecting proves the
+            # key works, but this is what proves the config is right.
+            self.configured.set()
+            log.info("session configuration accepted")
 
         elif kind == protocol.ERROR:
             log.error("realtime API error: %s", json.dumps(event.get("error", {}))[:400])
