@@ -260,3 +260,18 @@ def test_env_example_points_at_a_vault_that_exists() -> None:
     refs = re.findall(r"op://([^/]+)/", text)
     assert refs, "no op:// references found"
     assert set(refs) == {"Agent"}, f"unexpected vaults: {sorted(set(refs))}"
+
+
+def test_the_env_overrides_are_documented_where_tests_can_find_them() -> None:
+    """conftest clears exactly these. If a fourth is added and not listed
+    there, the suite silently starts reading live runtime state again."""
+    from tests.conftest import ORCHESTRATION_ENV
+
+    from orchestrator import registry
+
+    declared = {
+        value
+        for name, value in vars(registry).items()
+        if name.endswith("_ENV") and isinstance(value, str)
+    }
+    assert declared == set(ORCHESTRATION_ENV)

@@ -183,36 +183,46 @@ secrets_step() {
     return 1
   }
 
-  # With a service account token present we can resolve the references in
-  # .env ourselves, so a bare ./scripts/bootstrap.sh works the same as
-  # running it under `op run`.
-  if [ -z "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] && [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] \
-     && [ -r "${HERE}/.env" ] && have op; then
-    op_err="$(mktemp)"
-    if resolved="$(op run --env-file="${HERE}/.env" --no-masking -- env 2>"$op_err")"; then
-      for var in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY GH_TOKEN \
-                  HERMES_API_KEY OPENAI_API_KEY DISCORD_BOT_TOKEN; do
-        value="$(printf '%s\n' "$resolved" | sed -n "s/^${var}=//p" | head -1)"
-        [ -n "$value" ] && export "${var}=${value}"
-      done
-      unset resolved value
-    else
-      # This message is the whole diagnosis when it goes wrong, and it is
-      # read over chat, so it says what op said and which vaults exist
-      # rather than pointing at a log file nobody can see.
-      cat "$op_err" >> "$LOG"
-      info "op could not resolve .env: $(head -1 "$op_err" | clip)"
-      wanted="$(grep -o 'op://[^/]*' "${HERE}/.env" 2>/dev/null | sed 's|op://||' | sort -u | tr '\n' ' ')"
-      have="$(op vault list --format json 2>/dev/null \
-              | python3 -c 'import json,sys; print(" ".join(v["name"] for v in json.load(sys.stdin)))' 2>/dev/null)"
-      [ -n "$wanted" ] && info ".env asks for vault(s): ${wanted}"
-      [ -n "$have" ] && info "this account has:        ${have}"
-      if [ -n "$wanted" ] && [ -n "$have" ] && [ "$wanted" != "$have " ]; then
-        info "if .env is stale, refresh it: cp -f .env.example .env"
+  # Resolve each reference in .env individually rather than handing the
+  # whole file to `op run`. Two reasons, both learned the hard way: the
+  # old guard only ran when CLAUDE_CODE_OAUTH_TOKEN was absent, so an
+  # already-exported token meant every *other* reference was silently
+  # never resolved; and `op run` fails wholesale on one bad reference, so
+  # a missing optional item took the rest down with it.
+  resolve_from_vault() {
+    have op || return 0
+    [ -r "${HERE}/.env" ] || return 0
+    [ -n "${OP_SERVICE_ACCOUNT_TOKEN:-}" ] || return 0
+
+    local var ref value unresolved=""
+    for var in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY GH_TOKEN \
+               HERMES_API_KEY OPENAI_API_KEY DISCORD_BOT_TOKEN; do
+      # Anything already in the environment wins: `op run` may have put it
+      # there, or a human may be overriding deliberately.
+      [ -n "${!var:-}" ] && continue
+
+      ref="$(sed -n "s/^[[:space:]]*${var}=//p" "${HERE}/.env" | tr -d '"'"'"'' | head -1)"
+      case "$ref" in
+        op://*) ;;
+        *) continue ;;   # absent or commented out: not an error
+      esac
+
+      if value="$(op read "$ref" 2>>"$LOG")"; then
+        export "${var}=${value}"
+      else
+        unresolved="${unresolved}${var} "
       fi
+      unset value
+    done
+
+    if [ -n "$unresolved" ]; then
+      # Named individually, because "some secret is missing" is not
+      # something anyone can act on from a chat relay.
+      info "not in the vault yet: ${unresolved}"
+      info "  create the items named in .env, or comment out the refs you do not want"
     fi
-    rm -f "$op_err"
-  fi
+  }
+  resolve_from_vault
 
   local written=0 kept=0
   if write_secret claude-code oauth_token "${CLAUDE_CODE_OAUTH_TOKEN:-}"; then
@@ -258,6 +268,12 @@ secrets_step() {
   elif [ -r "${ORCH_SECRETS}/claude-code/oauth_token" ] \
      || [ -r "${ORCH_SECRETS}/claude-code/anthropic_api_key" ]; then
     pass "secrets in place (${written} written, ${kept} already present)"
+    # The voice bridge is optional, so its absence is a note rather than a
+    # failure -- but a silent absence is what sends someone hunting.
+    if [ ! -r "${ORCH_SECRETS}/voice/openai_api_key" ] \
+       || [ ! -r "${ORCH_SECRETS}/voice/discord_bot_token" ]; then
+      info "voice bridge not configured yet (needs openai_api_key and discord_bot_token)"
+    fi
   else
     fail "no Claude credential in ${ORCH_SECRETS}/claude-code/"
     info "expected oauth_token (from 'claude setup-token', which a human must run"
