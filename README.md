@@ -487,7 +487,7 @@ about any of it:
 What *is* covered off-host, and is worth running before you push:
 
 ```sh
-.venv/bin/python -m pytest -q          # 450 tests
+.venv/bin/python -m pytest -q          # 482 tests
 ./scripts/check-no-secrets.sh
 docker compose -f docker/docker-compose.yml config     # schema only
 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \
@@ -563,13 +563,63 @@ Discord rather than a web page because **the phone should be able to be in
 a pocket.** A browser tab needs the screen on and the page in front; a
 native app has background-audio privileges and push notifications.
 
-### Discord voice receive is an unsupported surface
+### SIP: a real phone number
 
-Worth being clear-eyed about: **Discord has never officially supported
-receiving voice.** py-cord's recording support reads a surface Discord does
-not document, has broken before, and is actively changing — their
-end-to-end encrypted voice protocol is exactly the kind of change that
-ends it.
+The primary voice path. Point a SIP trunk at
+`sip:$PROJECT_ID@sip.api.openai.com;transport=tls`, and OpenAI posts a
+`realtime.call.incoming` webhook when the number is dialled.
+
+**OpenAI bridges the audio itself.** For a SIP call this process never
+touches a sample — no resampling, no jitter buffer, no undocumented
+surface. `audio.py` and `playback.py` exist solely to feed Discord. What
+runs here is the door and the tool calls.
+
+```sh
+./bin/orchestrate-voice --transport sip
+```
+
+**Only numbers you list are answered.** Three layers, because caller ID
+alone is not a strong boundary — a SIP `From` header can be forged, and
+while a real telco trunk makes that hard for PSTN-originated calls, it is
+not proof:
+
+1. **Webhook signature.** The endpoint must be publicly reachable for
+   calls to arrive, so it will be found and poked. Anything unsigned or
+   replayed is refused, and the reply reveals nothing about the call.
+2. **Caller whitelist**, default-deny. An empty `allowed_callers` answers
+   nobody — a misconfiguration leaves the phone silent, never open.
+   Formatting is irrelevant: `+1 (425) 555-1212` and `4255551212` are the
+   same phone.
+3. **Filter at the trunk too.** Twilio can drop non-whitelisted callers
+   before they ever reach OpenAI, so your endpoint is not even touched.
+
+Unwanted calls get SIP `603 Decline` before a word is exchanged, and are
+never billed. And granting a credential still needs a spoken confirmation
+regardless of who is calling.
+
+Bind the webhook to loopback and put a tunnel in front — Cloudflare Tunnel
+or Tailscale Funnel — rather than opening a port. The only thing that needs
+to reach it is OpenAI.
+
+### Discord voice receive is broken upstream
+
+It has now happened. **Discord voice reception does not work**, and not
+through any fault of this code:
+
+- Discord made DAVE, its end-to-end voice encryption, **mandatory on 2
+  March 2026**. A client that advertises no support is rejected with close
+  code 4017.
+- py-cord 2.8 added DAVE for *sending*, which is why the bot connects and
+  can speak. Receiving from a DAVE call is not implemented — the library
+  says so itself at runtime: *"voice reception is currently broken due to
+  Discord's DAVE protocol"*, [Pycord issue 3139](https://github.com/Pycord-Development/pycord/issues/3139).
+
+So the bot can talk but cannot hear, and there is no configuration that
+changes that. Declining DAVE was investigated and does not work: sending
+`max_dave_protocol_version: 0` is exactly what gets close code 4017.
+
+Use `--transport sip`. The Discord adapter is kept because it is a few
+lines and would work again if Pycord ships its rework.
 
 For one person's own bot that is an acceptable trade, because nothing else
 gives you push-to-talk from a pocket this cheaply. But it is a trade with a

@@ -41,6 +41,11 @@ class RealtimeSession:
     model: str = protocol.DEFAULT_MODEL
     voice: str = protocol.DEFAULT_VOICE
     extra_instructions: str | None = None
+    #: Attach to a call that already exists (SIP) instead of starting a
+    #: fresh session. The configuration went in when the call was
+    #: accepted, so there is no session.update to send and no audio to
+    #: carry -- OpenAI bridges that to the phone itself.
+    call_id: str | None = None
 
     #: Set once the API acknowledges our session.update.
     configured: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
@@ -54,7 +59,10 @@ class RealtimeSession:
         """Open the socket and configure the session."""
         import websockets  # imported here so the core stays dependency-free
 
-        url = f"{protocol.WS_URL}?model={self.model}"
+        if self.call_id:
+            url = f"{protocol.WS_URL}?call_id={self.call_id}"
+        else:
+            url = f"{protocol.WS_URL}?model={self.model}"
         # No OpenAI-Beta header: that was the beta, and sending it at GA is
         # at best ignored and at worst rejected.
         headers = {"Authorization": f"Bearer {self.api_key}"}
@@ -62,6 +70,13 @@ class RealtimeSession:
         self._ws = await websockets.connect(url, additional_headers=headers)
         self._dispatcher = ToolDispatcher(self.server)
         tools = await realtime_tools(self.server)
+
+        if self.call_id:
+            # Already configured at accept time, and already answered.
+            self.configured.set()
+            log.info("attached to call %s, %d tools", self.call_id, len(tools))
+            return
+
         await self._send(
             protocol.session_config(
                 instructions=build_instructions(self.extra_instructions),

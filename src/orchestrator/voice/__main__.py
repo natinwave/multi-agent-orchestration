@@ -59,6 +59,80 @@ async def run(transport, session: RealtimeSession) -> None:
         await session.close()
 
 
+async def run_sip(server, voice_cfg: dict, config, api_key: str) -> int:
+    """Answer the phone.
+
+    Nothing about audio appears here: OpenAI bridges it between the caller
+    and the model. This process decides who gets answered, then attaches to
+    the accepted call to run tool calls.
+    """
+    from .prompt import build_instructions
+    from .sip import CallScreen, SipListener, accept_payload
+    from .tools import realtime_tools
+
+    allowed = tuple(voice_cfg.get("allowed_callers", ()))
+    if not allowed:
+        log.error(
+            "no allowed_callers in config/voice.toml -- every call would be "
+            "declined. List the numbers that may reach you."
+        )
+        return 2
+
+    secret = read_secret(config.secrets_root, "openai_webhook_secret") or ""
+    if not secret:
+        log.warning(
+            "no openai_webhook_secret: the caller whitelist still applies, but "
+            "anyone who finds the endpoint can make it ring. Add the reference "
+            "to .env and re-run bootstrap."
+        )
+
+    screen = CallScreen(allowed=allowed, signing_secret=secret)
+    tools = await realtime_tools(server)
+    instructions = build_instructions(voice_cfg.get("extra_instructions"))
+    model = voice_cfg.get("model", RealtimeSession.model)
+    voice = voice_cfg.get("voice", RealtimeSession.voice)
+
+    listener: SipListener
+
+    async def on_call(call_id: str) -> None:
+        """Answer, attach, and run until the caller hangs up."""
+        payload = accept_payload(instructions, tools, model, voice)
+        if not listener.accept(call_id, payload):
+            log.error("could not accept call %s", call_id)
+            return
+
+        session = RealtimeSession(
+            api_key=api_key,
+            server=server,
+            # OpenAI is carrying the audio; we only handle tools.
+            on_audio=_ignore_audio,
+            call_id=call_id,
+        )
+        try:
+            await session.connect()
+            await session.run()
+        except Exception:
+            log.exception("call %s ended badly", call_id)
+        finally:
+            await session.close()
+            log.info("call %s ended", call_id)
+
+    listener = SipListener(
+        screen=screen,
+        api_key=api_key,
+        on_call=on_call,
+        host=voice_cfg.get("sip_host", "127.0.0.1"),
+        port=int(voice_cfg.get("sip_port", 8787)),
+        path=voice_cfg.get("sip_path", "/sip"),
+    )
+    await listener.run()
+    return 0
+
+
+async def _ignore_audio(_pcm: bytes) -> None:
+    """SIP audio never reaches this process; OpenAI bridges it."""
+
+
 def build_transport(name: str, voice_cfg: dict, secrets_root: Path):
     if name == "discord":
         from .transport.discord import DiscordTransport
@@ -92,7 +166,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--transport",
         default="discord",
-        help="discord (default), or loopback for a smoke test with no audio",
+        help="sip for a real phone call, discord (currently deaf: Pycord 3139), "
+        "or loopback for a smoke test with no audio",
     )
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args(argv)
@@ -110,7 +185,10 @@ def main(argv: list[str] | None = None) -> int:
 
     voice_cfg = load_voice_config(config.config_dir)
     openai_key = read_secret(config.secrets_root, "openai_api_key")
-    transport, missing = build_transport(args.transport, voice_cfg, config.secrets_root)
+    if args.transport == "sip":
+        transport, missing = None, []
+    else:
+        transport, missing = build_transport(args.transport, voice_cfg, config.secrets_root)
     if not openai_key:
         missing = [f"{config.secrets_root}/voice/openai_api_key", *missing]
 
@@ -124,6 +202,10 @@ def main(argv: list[str] | None = None) -> int:
     from ..mcp_server import build_server
 
     server = build_server(Supervisor.create(config))
+
+    if args.transport == "sip":
+        return asyncio.run(run_sip(server, voice_cfg, config, openai_key))
+
     session = RealtimeSession(
         api_key=openai_key,
         server=server,

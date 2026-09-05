@@ -9,6 +9,30 @@
 # references in .env -- the same path every other identity uses.
 
 [voice]
+# --- SIP: a real phone call -------------------------------------------------
+# Point a trunk at sip:$PROJECT_ID@sip.api.openai.com and OpenAI posts a
+# webhook here when the number is dialled. OpenAI bridges the audio itself,
+# so this process never touches a sample.
+#
+# DEFAULT DENY. Only these numbers are answered; everything else gets SIP
+# 603 Decline before a word is exchanged, and is never billed. Formatting
+# does not matter -- "+1 (425) 555-1212" and "4255551212" are the same
+# phone. An empty list answers nobody.
+allowed_callers = []
+
+# Where the webhook listens. Bind loopback and put a tunnel in front
+# (Cloudflare Tunnel or Tailscale Funnel) rather than opening a port: the
+# only thing that needs to reach this is OpenAI.
+sip_host = "127.0.0.1"
+sip_port = 8787
+sip_path = "/sip"
+
+# --- Discord ------------------------------------------------------------------
+# NOTE: Discord voice RECEPTION is broken upstream (Pycord issue 3139).
+# DAVE, Discord's end-to-end encryption, has been mandatory since March
+# 2026 and py-cord cannot yet decrypt what it hears. The bot will join and
+# speak but will not hear you. Use the sip transport instead.
+#
 # The Discord voice channel the bot joins on startup. Right-click the
 # channel with developer mode on and copy its id.
 discord_channel_id = 0
