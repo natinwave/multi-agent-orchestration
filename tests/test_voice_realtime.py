@@ -214,3 +214,36 @@ def test_sending_empty_audio_is_a_no_op(session) -> None:
     s, rec = session
     run(s.send_audio(b""))
     assert rec.sent == []
+
+
+# --- session configuration -------------------------------------------------
+
+
+def test_both_audio_formats_carry_a_rate() -> None:
+    """The live API rejects a session whose output format has no rate, even
+    though the reference lists it as optional. Caught only by connecting,
+    so it is pinned here."""
+    audio = protocol.session_config("hi", [])["session"]["audio"]
+    for side in ("input", "output"):
+        fmt = audio[side]["format"]
+        assert fmt["type"] == protocol.AUDIO_FORMAT, side
+        assert fmt["rate"] == protocol.SAMPLE_RATE, f"{side} format needs an explicit rate"
+
+
+def test_the_session_declares_its_type_and_model() -> None:
+    session = protocol.session_config("hi", [])["session"]
+    assert session["type"] == "realtime"
+    assert session["model"] == protocol.DEFAULT_MODEL
+
+
+def test_the_configured_voice_is_one_the_api_accepts() -> None:
+    """Wrong voice is another rejection that only shows up on connect."""
+    valid = {
+        "alloy", "ash", "ballad", "coral", "echo",
+        "sage", "shimmer", "verse", "marin", "cedar",
+    }
+    assert protocol.DEFAULT_VOICE in valid
+
+
+def test_the_sample_rate_is_the_only_one_pcm_accepts() -> None:
+    assert protocol.SAMPLE_RATE == 24_000

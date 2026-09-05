@@ -21,7 +21,9 @@ DEFAULT_MODEL = "gpt-realtime-2.1"
 DEFAULT_VOICE = "marin"
 DEFAULT_REASONING_EFFORT = "low"
 
-# The Realtime API speaks 24 kHz mono PCM16 in both directions.
+# The Realtime API speaks 24 kHz mono PCM16 in both directions. 24000 is
+# the only rate accepted for PCM, and both the input and output format
+# objects must carry it.
 SAMPLE_RATE = 24_000
 AUDIO_FORMAT = "audio/pcm"
 
@@ -74,7 +76,13 @@ def session_config(
                     "turn_detection": {"type": "semantic_vad"},
                 },
                 "output": {
-                    "format": {"type": AUDIO_FORMAT},
+                    # `rate` is required here, despite the API reference
+                    # listing it as optional and the guide's own example
+                    # omitting it. The live API rejects the session with
+                    # "Missing required parameter:
+                    # session.audio.output.format.rate". Where the docs and
+                    # the server disagree, the server wins.
+                    "format": {"type": AUDIO_FORMAT, "rate": SAMPLE_RATE},
                     "voice": voice,
                 },
             },
