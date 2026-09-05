@@ -14,7 +14,11 @@ mcp = ["mcp>=2.0,<3"]
 # The voice bridge. py-cord rather than discord.py because receiving voice
 # is not part of discord.py's supported API; both install as `discord`, so
 # they must not share an environment.
-voice = ["mcp>=2.0,<3", "websockets>=12", "py-cord>=2.6"]
+# The [voice] extra is not optional for us: it pulls PyNaCl for the voice
+# encryption and davey for DAVE, Discord's end-to-end encrypted voice
+# protocol. Without them py-cord imports fine and then refuses to join a
+# voice channel, which is the whole point.
+voice = ["mcp>=2.0,<3", "websockets>=12", "py-cord[voice]>=2.6"]
 dev = ["pytest>=8.0"]
 
 [project.scripts]

@@ -609,11 +609,25 @@ Open the generated URL, pick your server. Then turn on Developer Mode
 put it in `config/voice.toml` — the copy, not the `.example`, which stays
 tracked so your channel id never conflicts on a pull.
 
-Two things that commonly go wrong. The bot needs **View Channel on that
-specific channel**, not only server-wide — a private channel with category
-overrides fails silently, so the code logs exactly that case. And only
-**py-cord** may be installed: `discord.py` also installs as `discord`, and
-the adapter raises a clear error if it finds the wrong one.
+Three things that commonly go wrong, all of them caught up front now
+rather than after the bot is connected and idle:
+
+- The bot needs **View Channel on that specific channel**, not only
+  server-wide — a category override can deny what a server-wide grant
+  gave.
+- The id must be the **voice** channel. Text and voice channels are often
+  named the same and look identical in the copy-id menu.
+- **py-cord with its `[voice]` extra.** Plain `py-cord` imports fine and
+  then refuses to join a channel; `discord.py` installs under the same
+  name and cannot receive voice at all. The extra pulls PyNaCl for voice
+  encryption and `davey` for DAVE, Discord's end-to-end encrypted voice
+  protocol — which is the same protocol change that could one day end
+  voice receive, so its presence here is mildly reassuring.
+
+`tests/test_voice_pycord.py` pins the py-cord API this depends on. It
+skips where py-cord is absent and runs on the host, so an upgrade that
+moves that ground is reported by the test suite rather than discovered
+halfway through a call.
 
 ### Setup
 
@@ -621,7 +635,7 @@ Two more items in the `Agent` vault — `OpenAI API Key` and
 `Discord Bot Token` — then set the channel id in `config/voice.toml`:
 
 ```sh
-.venv/bin/pip install -e '.[voice]'
+.venv/bin/pip install -e '.[voice]'              # py-cord[voice]: PyNaCl + davey
 cp config/voice.toml.example config/voice.toml   # then set discord_channel_id
 ./scripts/bootstrap.sh                           # materialises the voice identity
 

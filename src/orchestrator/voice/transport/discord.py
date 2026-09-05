@@ -89,6 +89,19 @@ class DiscordTransport:
                 "does not. Both install as `discord`, so uninstall discord.py first."
             )
 
+        # py-cord imports perfectly well without its voice dependencies and
+        # only fails when you try to join a channel -- by which point the
+        # bot is connected and looks healthy. Check up front instead.
+        try:
+            import discord.voice  # noqa: F401
+        except Exception as exc:  # noqa: BLE001 - py-cord raises its own type
+            raise RuntimeError(
+                "py-cord is installed without its voice dependencies "
+                f"({exc}). Install the extra: pip install 'py-cord[voice]' -- "
+                "PyNaCl handles voice encryption and davey handles DAVE, "
+                "Discord's end-to-end encrypted voice protocol."
+            ) from exc
+
         # Nothing here is a privileged intent: the bot joins a voice channel
         # and streams. It never reads message content.
         intents = discord.Intents.default()
@@ -96,6 +109,9 @@ class DiscordTransport:
         intents.message_content = False
         bot = discord.Bot(intents=intents)
         transport = self
+
+        transport._sink = lambda: _Sink()
+        transport._source = lambda: _Source()
 
         class _Sink(discord.sinks.Sink):
             """Forwards each decoded packet instead of recording a file.
@@ -125,19 +141,36 @@ class DiscordTransport:
 
         @bot.event
         async def on_ready() -> None:  # noqa: D103
-            log.info("connected to discord as %s", bot.user)
-            channel = bot.get_channel(transport.channel_id)
-            if channel is None:
-                log.error(
-                    "cannot see channel %s -- is the bot invited to that server, "
-                    "and does it have View Channel on it?",
-                    transport.channel_id,
-                )
-                return
-
-            voice_client = await channel.connect()
-            voice_client.play(_Source())
-            voice_client.start_recording(_Sink(), lambda *a: None)
-            log.info("listening in %s", channel.name)
+            # discord.py swallows exceptions raised in event handlers and
+            # logs "Ignoring exception in on_ready", which leaves the
+            # process connected, idle and looking healthy forever. Anything
+            # that goes wrong here means the bot cannot do its job, so it
+            # ends the run instead of being ignored.
+            try:
+                await transport._join(bot)
+            except Exception:
+                log.exception("could not start listening; shutting down")
+                await bot.close()
 
         return bot
+
+    async def _join(self, bot: Any) -> None:
+        log.info("connected to discord as %s", bot.user)
+        channel = bot.get_channel(self.channel_id)
+        if channel is None:
+            raise RuntimeError(
+                f"cannot see channel {self.channel_id} -- is the bot invited to "
+                "that server, and does it have View Channel on that specific "
+                "channel? A category override can deny it server-wide grants."
+            )
+        if not hasattr(channel, "connect"):
+            raise RuntimeError(
+                f"channel {self.channel_id} ({channel.name!r}) is not a voice "
+                "channel. Both channels are often named the same; copy the id "
+                "from the one under Voice Channels."
+            )
+
+        voice_client = await channel.connect()
+        voice_client.play(self._source())
+        voice_client.start_recording(self._sink(), lambda *a: None)
+        log.info("listening in %s", channel.name)
