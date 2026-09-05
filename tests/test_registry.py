@@ -275,3 +275,33 @@ def test_the_env_overrides_are_documented_where_tests_can_find_them() -> None:
         if name.endswith("_ENV") and isinstance(value, str)
     }
     assert declared == set(ORCHESTRATION_ENV)
+
+
+def test_cli_flags_are_configuration_not_code() -> None:
+    """The brief asked for the registry to be config rather than code. It
+    only really is once a second CLI needs no edit to the backend."""
+    agent = load().agents["claude-code"]
+    assert "{session_id}" in " ".join(agent.session_flags)
+    assert "{session_id}" in " ".join(agent.resume_flags)
+    assert "{agent_prompt}" in " ".join(agent.system_prompt_flags)
+
+
+def test_no_claude_specific_flags_remain_in_the_backend() -> None:
+    """If these creep back into the backend, adding another harness stops
+    being a config change again."""
+    from pathlib import Path as P
+
+    source = (P(__file__).resolve().parents[1] / "src" / "orchestrator" / "backends" / "container.py").read_text()
+    for flag in ("--session-id", "--resume", "--append-system-prompt-file"):
+        assert flag not in source, f"{flag} is hardcoded in the container backend"
+
+
+def test_an_agent_without_resume_flags_reports_no_sessions(tmp_path: Path) -> None:
+    """Not every CLI has sessions. That is a fact to report, not a bug."""
+    agents = (
+        '[agents.oneshot]\ntype = "container"\ncontainer = "c"\n'
+        'command = ["tool", "run"]\n'
+    )
+    cfg = load(write_config(tmp_path, agents=agents))
+    assert cfg.agents["oneshot"].can_resume is False
+    assert cfg.agents["claude-code"].can_resume if "claude-code" in cfg.agents else True

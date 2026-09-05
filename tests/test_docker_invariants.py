@@ -176,3 +176,47 @@ def test_voice_secrets_are_a_separate_identity_from_the_agents() -> None:
     assert "write_secret voice openai_api_key" in bootstrap
     assert "write_secret voice discord_bot_token" in bootstrap
     assert "write_secret claude-code openai_api_key" not in bootstrap
+
+
+# --- what agents can actually do ------------------------------------------
+
+
+@pytest.mark.parametrize("tool", ["python3", "python3-venv", "python3-pip", "build-essential"])
+def test_python_is_available_to_agents(tool: str) -> None:
+    """Most of the projects these agents work on are Python. Without it the
+    first command an agent runs fails."""
+    assert tool in DOCKERFILE
+
+
+def test_pep668_will_not_block_a_pip_install() -> None:
+    """Ubuntu marks the system Python externally-managed, and the resulting
+    error sends an agent hunting for a problem that is not there."""
+    assert "PIP_BREAK_SYSTEM_PACKAGES=1" in DOCKERFILE
+
+
+def test_a_browser_is_available() -> None:
+    assert "playwright" in DOCKERFILE
+    assert "chromium" in DOCKERFILE
+
+
+def test_browsers_live_on_a_shared_path() -> None:
+    """So the Python playwright package finds the same binaries as the Node
+    one, instead of downloading a second copy per language."""
+    assert "PLAYWRIGHT_BROWSERS_PATH=/opt/playwright" in DOCKERFILE
+
+
+def test_agents_still_cannot_run_containers() -> None:
+    """Every way to give a container Docker -- the socket, privileged
+    docker-in-docker, relaxing cap_drop -- hands back the isolation this
+    design rests on. Agents reach services instead of running them."""
+    for name, text in (("compose", COMPOSE_CODE), ("Dockerfile", DOCKERFILE)):
+        assert "privileged" not in text, name
+        assert "docker.sock" not in text, name
+    assert "cap_drop" in COMPOSE_CODE
+    assert "no-new-privileges" in COMPOSE_CODE
+
+
+def test_agents_can_reach_services_on_the_host() -> None:
+    """The replacement for running containers: an agent can talk to a
+    database or dev server the host is running, by name."""
+    assert "host.docker.internal:host-gateway" in COMPOSE_CODE

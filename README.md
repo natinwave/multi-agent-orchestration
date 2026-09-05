@@ -277,6 +277,35 @@ Containers are long-lived and carry the toolchain, so a job costs a
 `docker exec`, not an image pull and an `npm install`. `~/.claude/settings.json`
 is baked into the image.
 
+### What an agent has
+
+Python 3 with venv and pip, Node 20, git, ripgrep, curl, jq, a compiler,
+and Chromium via Playwright. Network access. Browsers install to a shared
+`/opt/playwright` so the Python and Node packages find the same binaries
+instead of downloading one copy each.
+
+Ubuntu marks the system Python externally-managed, so `PIP_BREAK_SYSTEM_PACKAGES`
+is set: in a disposable container there is nothing to protect, and the PEP
+668 error otherwise sends an agent hunting for a problem that is not there.
+The agent prompt still asks for the project's own environment on real work,
+where its pinned versions are what the tests run against.
+
+### What an agent deliberately does not have
+
+**Docker.** Not the socket, not privileged docker-in-docker, not a relaxed
+`cap_drop`. Every route to running containers inside a container hands back
+the isolation this design rests on — the socket is host root, and
+`--privileged` is host root by another name.
+
+The need behind "I want Docker" is almost always *reaching* a service, not
+running one, so agents get `host.docker.internal` instead: a database, a
+dev server or the local model running on the host is addressable by name.
+That grants nothing new — the bridge gateway was always reachable by
+address — it just means an agent need not guess an IP.
+
+If an agent genuinely needs a container brought up, it should say so and
+stop. A human or the relay agent starts it on the host.
+
 Each job gets `worktrees/<job>` on branch `job/<job>`, cut fresh from the
 base ref, so four concurrent sessions cannot collide on branches or files.
 Jobs needing no repository get a scratch directory instead — plenty of
@@ -413,6 +442,27 @@ bootstrap. Unknown keys are rejected at load time rather than ignored,
 because a silently-dropped `timeout_second` typo means an agent running
 with the wrong timeout for weeks.
 
+**A different CLI is also config.** Each agent declares how its tool spells
+"start a session", "resume one" and "take a system prompt":
+
+```toml
+session_flags       = ["--session-id", "{session_id}"]
+resume_flags        = ["--resume", "{session_id}"]
+system_prompt_flags = ["--append-system-prompt-file", "{agent_prompt}"]
+```
+
+An agent with no `resume_flags` simply has no sessions — `reply()` says so
+plainly rather than failing strangely. A test asserts no tool-specific flag
+creeps back into the backend, because that is what made adding a second
+harness a code change the first time.
+
+`config/agents.toml` carries a commented `codex` entry as a worked example.
+
+**An OpenAI-compatible API needs nothing at all** — `base_url`, `model`,
+done, like `hermes`. But that backend is one request and one answer: no
+worktree, no tools, no file access. It answers questions; it does not do
+coding work.
+
 ---
 
 ## What cannot be tested off the target host
@@ -437,7 +487,7 @@ about any of it:
 What *is* covered off-host, and is worth running before you push:
 
 ```sh
-.venv/bin/python -m pytest -q          # 434 tests
+.venv/bin/python -m pytest -q          # 446 tests
 ./scripts/check-no-secrets.sh
 docker compose -f docker/docker-compose.yml config     # schema only
 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \

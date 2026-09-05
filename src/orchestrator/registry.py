@@ -84,6 +84,14 @@ class Agent:
     # container backend
     container: str | None = None
     command: tuple[str, ...] = ()
+    # How this particular CLI is told to start a session, resume one, and
+    # take a system prompt. Config rather than code, because every agentic
+    # CLI spells these differently and hardcoding one tool's flags in the
+    # backend made "add an agent" a code change for anything but a second
+    # Claude Code. Placeholders: {session_id}, {agent_prompt}.
+    session_flags: tuple[str, ...] = ()
+    resume_flags: tuple[str, ...] = ()
+    system_prompt_flags: tuple[str, ...] = ()
     # http_openai backend
     base_url: str | None = None
     model: str | None = None
@@ -94,6 +102,16 @@ class Agent:
     needs_repo: bool = False
     timeout_seconds: int = 3600
     max_tokens: int = 2048
+
+
+    @property
+    def can_resume(self) -> bool:
+        """Whether reply() can continue this agent's work.
+
+        A CLI with no resume flag is not broken -- it simply has no
+        sessions, and a parked job has to be restarted instead.
+        """
+        return bool(self.resume_flags)
 
 
 @dataclass(frozen=True)
@@ -260,8 +278,9 @@ def load(config_dir: Path | None = None, root_override: Path | None = None) -> C
         else:
             raise ConfigError(f"{where}: unknown type {kind!r}")
         spec = dict(spec)
-        if "command" in spec:
-            spec["command"] = tuple(spec["command"])
+        for list_field in ("command", "session_flags", "resume_flags", "system_prompt_flags"):
+            if list_field in spec:
+                spec[list_field] = tuple(spec[list_field])
         agents[name] = Agent(name=name, **spec)
 
     repos: dict[str, Repo] = {}

@@ -35,6 +35,21 @@ useful than a silent one.
 
 Do not narrate `done` or `failed`. Those come from how your process exits.
 
+### What you have
+
+Python 3, Node 20, git, ripgrep, curl, jq, a compiler, and a real browser
+via Playwright. You have network access.
+
+For project work use the project's own environment -- a virtualenv, its
+lockfile, its pinned versions -- rather than installing into the system
+Python. Installing globally is allowed and will not error, but it is not
+what the project's tests will run against.
+
+You cannot run containers, and there is no Docker here. If you need a
+database or another service, it is probably already running on the host
+machine: reach it at `host.docker.internal` on its usual port. If that is
+not enough, say so and stop rather than trying to work around it.
+
 ### Your workspace
 
 You are in a git worktree on a branch named after this job, cut fresh from

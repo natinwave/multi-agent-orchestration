@@ -26,6 +26,12 @@ command = [
   "--include-partial-messages",
   "--verbose",
 ]
+# How this CLI spells "start a session", "resume that session", and "take
+# a system prompt". Placeholders: {session_id}, {agent_prompt}. Another
+# agentic CLI spells these differently, which is why they are config.
+session_flags = ["--session-id", "{session_id}"]
+resume_flags = ["--resume", "{session_id}"]
+system_prompt_flags = ["--append-system-prompt-file", "{agent_prompt}"]
 # Wall-clock ceiling. Long-horizon work, so this is generous.
 timeout_seconds = 14400
 
@@ -43,3 +49,19 @@ api_key_file = "api_key"
 needs_repo = false
 timeout_seconds = 300
 max_tokens = 2048
+
+# A second harness, as an example. Uncomment, add the tool to the image and
+# a matching service to docker-compose.yml, and it works like any other --
+# no code changes. An agent with no resume_flags simply has no sessions:
+# reply() says so plainly rather than failing strangely.
+#
+# [agents.codex]
+# type = "container"
+# description = "OpenAI's coding CLI. A second opinion on the same worktree."
+# container = "orch-codex"
+# secrets_dir = "/run/orchestration/secrets/codex"
+# default_repo = "main"
+# needs_repo = true
+# command = ["codex", "exec", "--full-auto"]
+# system_prompt_flags = ["--instructions-file", "{agent_prompt}"]
+# timeout_seconds = 14400

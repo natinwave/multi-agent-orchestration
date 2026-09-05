@@ -67,6 +67,16 @@ services:
       # volume has anything in it.
       - claude-code-home:/home/agent
 
+    # Agents cannot run containers -- no docker.sock, and no privileged
+    # docker-in-docker, both of which are host root and would undo the
+    # per-agent credential scoping this whole design rests on. What they
+    # need instead is to REACH services the host runs: a database, a dev
+    # server, the local model. This makes the host addressable by name.
+    # It grants nothing new -- the bridge gateway was already reachable by
+    # address -- it just means an agent does not have to guess the IP.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
     environment:
       # Paths and switches only. Never a credential -- anything set here is
       # visible in `docker inspect` to anyone in the docker group.

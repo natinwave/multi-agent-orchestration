@@ -22,7 +22,25 @@ from ..registry import Agent, Config
 from ..state import JobPaths, Meta
 from .base import BackendError, Outcome
 
-__all__ = ["ContainerBackend"]
+__all__ = ["ContainerBackend", "AGENT_PROMPT_PATH"]
+
+#: The narration contract, baked into the image.
+AGENT_PROMPT_PATH = "/etc/orchestration/agent-prompt.md"
+
+
+def _expand(flags, substitutions: dict[str, str]) -> list[str]:
+    """Fill {session_id} / {agent_prompt} in a configured flag list.
+
+    Unknown placeholders are left alone rather than raising: a stray brace
+    in someone's flag is not worth failing a job over.
+    """
+    out = []
+    for flag in flags:
+        try:
+            out.append(flag.format(**substitutions))
+        except (KeyError, IndexError, ValueError):
+            out.append(flag)
+    return out
 
 # The agent's own identity, read inside the container and exported for one
 # process. These two have fixed environment names; anything else granted
@@ -159,9 +177,15 @@ class ContainerBackend:
             'oauth_token or anthropic_api_key; see README" >&2; exit 78; fi'
         )
 
+        # Every flag shape comes from the registry, so adding a different
+        # agentic CLI is a config change rather than an edit here.
+        substitutions = {
+            "session_id": meta.session_id,
+            "agent_prompt": AGENT_PROMPT_PATH,
+        }
         argv = list(agent.command)
-        argv += ["--session-id", meta.session_id] if not resume else ["--resume", meta.session_id]
-        argv += ["--append-system-prompt-file", "/etc/orchestration/agent-prompt.md"]
+        argv += _expand(agent.resume_flags if resume else agent.session_flags, substitutions)
+        argv += _expand(agent.system_prompt_flags, substitutions)
         lines.append(f"cd {shlex.quote(str(workdir))}")
         lines.append(f"exec {shlex.join(argv)}")
         return "\n".join(lines)

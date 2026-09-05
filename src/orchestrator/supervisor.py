@@ -213,6 +213,22 @@ class Supervisor:
         if paths is None:
             return self._out({"error": "unknown_job", "message": f"no job called {job_id!r}"})
 
+        meta = Meta.read(paths)
+        try:
+            agent_spec = self.config.agent(meta.agent)
+        except UnknownAgent as exc:
+            return self._out({"error": "unknown_agent", "message": str(exc), "known": exc.known})
+        if agent_spec.type == "container" and not agent_spec.can_resume:
+            return self._out(
+                {
+                    "error": "cannot_resume",
+                    "message": (
+                        f"{meta.agent} has no way to resume a session -- "
+                        f"start a new job with the answer included"
+                    ),
+                }
+            )
+
         status = self._reconciled(paths)
         if not status.state.is_parked:
             return self._out(

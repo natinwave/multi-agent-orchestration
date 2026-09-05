@@ -18,6 +18,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     npm_config_fund=false
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential \
         ca-certificates \
         curl \
         git \
@@ -26,10 +27,23 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         less \
         openssh-client \
         procps \
+        python3 \
+        python3-dev \
+        python3-pip \
+        python3-venv \
         ripgrep \
         tini \
         unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Ubuntu 24.04 marks the system Python externally-managed (PEP 668), so a
+# plain `pip install` fails with an error that sends an agent hunting.
+# Inside a disposable container there is nothing to protect, so allow it --
+# the agent prompt still asks for a venv on real project work, where the
+# project's own pinned versions matter.
+ENV PIP_BREAK_SYSTEM_PACKAGES=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_ROOT_USER_ACTION=ignore
 
 # Node 20 from NodeSource. The distro's nodejs is too old for Claude Code.
 RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
@@ -40,6 +54,17 @@ RUN curl -fsSL "https://deb.nodesource.com/setup_${NODE_MAJOR}.x" | bash - \
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
     && npm cache clean --force \
     && claude --version
+
+# A real browser, for agents that need to look at a page rather than curl
+# it. Installed to a shared path rather than a user cache so the Python
+# playwright package finds the same binaries as the Node one -- otherwise
+# a Python project would download a second copy into the agent's home.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+RUN npm install -g playwright@latest \
+    && playwright install --with-deps chromium \
+    && chmod -R a+rX /opt/playwright \
+    && npm cache clean --force \
+    && rm -rf /var/lib/apt/lists/*
 
 # ubuntu:24.04 ships a stock `ubuntu` user already sitting on uid 1000, which
 # is exactly the uid we usually want. Remove it before creating ours.
