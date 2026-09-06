@@ -269,3 +269,137 @@ def test_a_declined_call_reports_the_digits_to_whitelist(caplog) -> None:
     with caplog.at_level(logging.WARNING):
         listener._decide(decision)
     assert "4255551212" in caplog.text
+
+
+# --- the webhook must answer immediately -----------------------------------
+
+
+def _post(url: str, payload: bytes, timeout: float = 5.0):
+    import urllib.request
+
+    return urllib.request.urlopen(
+        urllib.request.Request(url, data=payload, method="POST"), timeout=timeout
+    )
+
+
+def _serve(listener, port_holder):
+    """Run a listener briefly and return the loop task."""
+    import asyncio
+
+    return asyncio.create_task(listener.run())
+
+
+def test_the_webhook_answers_before_talking_to_openai() -> None:
+    """Accepting or rejecting a call is an HTTPS round trip. Doing it while
+    the webhook connection is still open held that connection long enough
+    for the tunnel in front to give up and return 502 -- so the call was
+    never accepted and rang until it timed out.
+
+    The response must land regardless of how slow that round trip is.
+    """
+    import asyncio
+    import time
+
+    from orchestrator.voice.sip import SipListener
+
+    async def scenario() -> float:
+        listener = SipListener(
+            CallScreen(allowed=(MINE,), signing_secret=""),
+            api_key="unused",
+            on_call=lambda call_id: asyncio.sleep(0),
+            port=8903,
+        )
+        # Stand in for an OpenAI call that hangs.
+        listener._post = lambda url, payload: time.sleep(10) or {}
+
+        task = asyncio.create_task(listener.run())
+        await asyncio.sleep(0.3)
+        try:
+            started = time.monotonic()
+            response = _post("http://127.0.0.1:8903/sip", incoming(caller=THEIRS))
+            elapsed = time.monotonic() - started
+            assert response.status == 200
+            return elapsed
+        finally:
+            task.cancel()
+
+    elapsed = asyncio.run(scenario())
+    assert elapsed < 2.0, f"webhook took {elapsed:.1f}s; a proxy would have given up"
+
+
+def test_an_accepted_call_reaches_the_handler() -> None:
+    import asyncio
+
+    from orchestrator.voice.sip import SipListener
+
+    answered: list[str] = []
+
+    async def scenario() -> None:
+        async def on_call(call_id: str) -> None:
+            answered.append(call_id)
+
+        listener = SipListener(
+            CallScreen(allowed=(MINE,), signing_secret=""),
+            api_key="unused",
+            on_call=on_call,
+            port=8904,
+        )
+        task = asyncio.create_task(listener.run())
+        await asyncio.sleep(0.3)
+        try:
+            _post("http://127.0.0.1:8904/sip", incoming(caller=MINE))
+            await asyncio.sleep(0.4)
+        finally:
+            task.cancel()
+
+    asyncio.run(scenario())
+    assert answered == ["call_abc123"]
+
+
+def test_a_query_string_does_not_break_routing() -> None:
+    """Proxies and providers append them; the path is a route, not a URL."""
+    import asyncio
+
+    from orchestrator.voice.sip import SipListener
+
+    async def scenario() -> int:
+        listener = SipListener(
+            CallScreen(allowed=(MINE,), signing_secret=""),
+            api_key="unused",
+            on_call=lambda call_id: asyncio.sleep(0),
+            port=8905,
+        )
+        task = asyncio.create_task(listener.run())
+        await asyncio.sleep(0.3)
+        try:
+            return _post("http://127.0.0.1:8905/sip?source=openai", incoming()).status
+        finally:
+            task.cancel()
+
+    assert asyncio.run(scenario()) == 200
+
+
+def test_an_unknown_path_is_not_served() -> None:
+    import asyncio
+    import urllib.error
+
+    from orchestrator.voice.sip import SipListener
+
+    async def scenario() -> int:
+        listener = SipListener(
+            CallScreen(allowed=(MINE,), signing_secret=""),
+            api_key="unused",
+            on_call=lambda call_id: asyncio.sleep(0),
+            port=8906,
+        )
+        task = asyncio.create_task(listener.run())
+        await asyncio.sleep(0.3)
+        try:
+            _post("http://127.0.0.1:8906/admin", incoming())
+            return 200
+        except urllib.error.HTTPError as exc:
+            return exc.code
+        finally:
+            task.cancel()
+
+    assert asyncio.run(scenario()) == 404

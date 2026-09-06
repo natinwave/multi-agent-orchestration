@@ -250,29 +250,52 @@ class SipListener:
             protocol_version = "HTTP/1.1"
 
             def do_POST(self) -> None:  # noqa: N802 - http.server's naming
-                if self.path.rstrip("/") != listener.path.rstrip("/"):
+                # Strip any query string: the path is a route, not a URL.
+                route = self.path.split("?", 1)[0].rstrip("/")
+                if route != listener.path.rstrip("/"):
                     self._reply(404, {"error": "not found"})
                     return
-                length = int(self.headers.get("Content-Length", 0) or 0)
-                body = self.rfile.read(length)
+
+                try:
+                    length = int(self.headers.get("Content-Length", 0) or 0)
+                    body = self.rfile.read(length) if length else b""
+                except (ValueError, OSError):
+                    self._reply(400, {"error": "could not read the request"})
+                    return
+
                 decision = listener.screen_.screen(
                     body,
                     self.headers.get("webhook-signature"),
                     self.headers.get("webhook-timestamp"),
                 )
-                # 200 either way: the caller of this endpoint is OpenAI,
-                # and the accept/reject is expressed by the API call we
-                # make below, not by this status code.
+
+                # Answer FIRST, and finish answering, before doing anything
+                # that can block. Accepting or rejecting a call is an HTTPS
+                # round trip to OpenAI; doing it inline held this
+                # connection open long enough for the tunnel in front to
+                # give up and return 502 -- so the call was never accepted
+                # and rang until it timed out.
+                #
+                # 200 either way: accept and reject are expressed by the
+                # API call made afterwards, not by this status code.
                 self._reply(200, {"received": True})
-                listener._decide(decision)
+                threading.Thread(
+                    target=listener._decide, args=(decision,), daemon=True
+                ).start()
 
             def _reply(self, status: int, payload: dict) -> None:
                 data = json.dumps(payload).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(data)))
+                # Close rather than keep alive: one webhook per connection
+                # is plenty, and it removes any chance of a proxy and this
+                # server disagreeing about where the response ended.
+                self.send_header("Connection", "close")
                 self.end_headers()
                 self.wfile.write(data)
+                self.wfile.flush()
+                self.close_connection = True
 
             def log_message(self, *args) -> None:
                 pass  # our own logging is more useful than the default
