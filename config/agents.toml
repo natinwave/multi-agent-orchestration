@@ -108,7 +108,7 @@ max_tokens = 2048
 
 [agents.soren]
 type = "bedrock_agentcore"
-description = "A PharmacyChecker agent on AWS. Knows that product and its data; cannot touch this machine or any repository here."
+description = "A PharmacyChecker agent on AWS, with its own access to that product. Delegate PharmacyChecker work to it and relay what it says -- it does the work itself. It cannot touch this machine, and its repositories are not checked out here."
 harness_arn = "arn:aws:bedrock-agentcore:us-east-1:824683096545:harness/Soren-RSXzGGYQaQ"
 region = "us-east-1"
 secrets_dir = "/run/orchestration/secrets/agentcore"
@@ -117,7 +117,7 @@ timeout_seconds = 600
 
 [agents.vesper]
 type = "bedrock_agentcore"
-description = "A second PharmacyChecker agent on AWS, alongside Soren. Same reach: that product's world, not this machine."
+description = "Owns deployments for the PharmacyChecker repositories -- the API, the website and the rest. Ask it about pending changes or to ship something; it does the work itself. Never open those repositories here; Vesper handles them."
 harness_arn = "arn:aws:bedrock-agentcore:us-east-1:824683096545:harness/Vesper-CVQBrrztvd"
 region = "us-east-1"
 secrets_dir = "/run/orchestration/secrets/agentcore"

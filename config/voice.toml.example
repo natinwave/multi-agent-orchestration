@@ -59,7 +59,17 @@ announce_interval_seconds = 8
 
 # Appended to the base instructions, never merged over them. Put anything
 # site-specific here: which repos matter, how you refer to things.
+# Routing rules belong here rather than in the base prompt: which work goes
+# to which agent is about your setup, not about how a voice agent should
+# behave. Naming an agent explicitly is what stops the coding agent being
+# pointed at a codebase somebody else already owns.
 extra_instructions = """
-The kiln repo is a pottery kiln controller. PharmacyChecker is a drug
-price comparison site with several repos; "the API" means data-api.
+The kiln repo is a pottery kiln controller; the coding agent handles it.
+
+PharmacyChecker is a drug price comparison site. Its repositories are NOT
+checked out here and are not yours to edit: Vesper owns deployments across
+them, and Soren handles the rest. Anything about PharmacyChecker -- "the
+API", the website, a deploy, a pending change -- goes to one of them, and
+your job is to relay what they say. Never start a coding job on a
+PharmacyChecker repository.
 """
