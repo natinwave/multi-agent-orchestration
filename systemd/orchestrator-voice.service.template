@@ -34,6 +34,16 @@ Documentation=https://github.com/natinwave/multi-agent-orchestration
 After=network-online.target
 Wants=network-online.target
 
+# Do not give up after the usual burst limit of five starts in ten
+# seconds. Credentials live on a tmpfs wiped every boot and refilled by
+# bootstrap.sh, so after a restart this fails until that has run -- and a
+# phone line that stops retrying is a phone line that is quietly dead.
+#
+# These are [Unit] keys. systemd ignores them in [Service] with only a log
+# line to say so, which is how they sat here doing nothing.
+StartLimitIntervalSec=0
+StartLimitBurst=0
+
 [Service]
 Type=simple
 WorkingDirectory=%REPO%
@@ -45,9 +55,6 @@ ExecStart=%REPO%/bin/orchestrate-voice --transport sip
 # next attempt succeeds and the phone works again with nobody intervening.
 Restart=always
 RestartSec=15
-# Do not give up after the usual burst limit. A phone line that stops
-# retrying after five failures is a phone line that is quietly dead.
-StartLimitIntervalSec=0
 
 # Journald gets the log; the listener writes plain lines with timestamps.
 StandardOutput=journal

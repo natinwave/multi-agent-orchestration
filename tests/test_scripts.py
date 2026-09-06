@@ -242,12 +242,37 @@ def test_the_service_installer_is_valid_and_executable() -> None:
     assert path.stat().st_mode & 0o111
 
 
+def _unit_section(name: str) -> str:
+    """The body of one [Section] of the unit file."""
+    import re
+
+    match = re.search(rf"^\[{name}\]\n(.*?)(?=^\[|\Z)", SERVICE_TEMPLATE, re.M | re.S)
+    return match.group(1) if match else ""
+
+
 def test_the_service_restarts_forever() -> None:
     """Credentials live on a tmpfs wiped every boot, so after a restart the
     listener fails until bootstrap refills them. Giving up after the usual
     burst limit would leave the phone quietly dead."""
-    assert "Restart=always" in SERVICE_TEMPLATE
+    assert "Restart=always" in _unit_section("Service")
     assert "StartLimitIntervalSec=0" in SERVICE_TEMPLATE
+
+
+def test_start_limit_keys_are_in_the_unit_section() -> None:
+    """systemd ignores these in [Service] and says so only in a log line,
+    so they sat there doing nothing while the comment claimed otherwise.
+    Placement is the whole point of the setting."""
+    unit, service = _unit_section("Unit"), _unit_section("Service")
+    for key in ("StartLimitIntervalSec", "StartLimitBurst"):
+        assert key in unit, f"{key} belongs in [Unit]"
+        assert key not in service, f"{key} in [Service] is silently ignored"
+
+
+def test_restart_keys_are_in_the_service_section() -> None:
+    """The mirror image: these are ignored in [Unit]."""
+    service = _unit_section("Service")
+    assert "Restart=always" in service
+    assert "RestartSec=" in service
 
 
 def test_the_service_runs_as_a_user_not_root() -> None:
