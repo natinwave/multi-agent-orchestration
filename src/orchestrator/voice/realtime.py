@@ -75,6 +75,11 @@ class RealtimeSession:
             # Already configured at accept time, and already answered.
             self.configured.set()
             log.info("attached to call %s, %d tools", self.call_id, len(tools))
+            # Say something. The model does not speak until asked to, or
+            # until turn detection decides the caller has finished -- so
+            # without this the caller gets an open line and silence, which
+            # is indistinguishable from a broken system.
+            await self._send({"type": protocol.RESPONSE_CREATE})
             return
 
         await self._send(
@@ -116,7 +121,7 @@ class RealtimeSession:
         """Pump server events until the socket closes."""
         if self._ws is None:
             raise RuntimeError("session is not connected")
-        async for raw in self._ws:
+        async for raw in self._ws:  # ends when the far side closes
             try:
                 event = json.loads(raw)
             except json.JSONDecodeError:
@@ -164,6 +169,14 @@ class RealtimeSession:
 
         elif kind == protocol.ERROR:
             log.error("realtime API error: %s", json.dumps(event.get("error", {}))[:400])
+
+        else:
+            # Everything above is handled; everything else was previously
+            # dropped in silence, which left no way to tell "the API sent
+            # nothing" from "the API sent something we ignore". At debug
+            # level this is the difference between diagnosing a silent call
+            # in one attempt and guessing at it.
+            log.debug("unhandled event: %s", kind)
 
     async def _cancel_response(self) -> None:
         try:

@@ -434,5 +434,14 @@ def accept_payload(
         "instructions": instructions,
         "tools": tools,
         "tool_choice": "auto",
-        "audio": {"output": {"voice": voice}},
+        "audio": {
+            # Turn detection has to be asked for. Without it the model
+            # never decides the caller has finished speaking, so it never
+            # answers -- an open line, total silence, and nothing in the
+            # log to say why. Semantic VAD waits for a finished thought
+            # rather than merely a gap, which suits someone thinking aloud
+            # about what an agent should do.
+            "input": {"turn_detection": {"type": "semantic_vad"}},
+            "output": {"voice": voice},
+        },
     }

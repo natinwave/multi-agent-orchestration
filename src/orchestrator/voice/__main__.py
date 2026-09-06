@@ -111,8 +111,14 @@ async def run_sip(server, voice_cfg: dict, config, api_key: str) -> int:
         try:
             await session.connect()
             await session.run()
-        except Exception:
-            log.exception("call %s ended badly", call_id)
+        except Exception as exc:  # noqa: BLE001 - one call must not end the service
+            # Hanging up drops the socket without a close frame, which is
+            # how a normal call ends. Printing a traceback for that taught
+            # us to distrust the log at exactly the moment it mattered.
+            if type(exc).__name__ in {"ConnectionClosedError", "ConnectionClosedOK"}:
+                log.info("caller hung up")
+            else:
+                log.exception("call %s ended badly", call_id)
         finally:
             await session.close()
             log.info("call %s ended", call_id)

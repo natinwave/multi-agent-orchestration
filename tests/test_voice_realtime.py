@@ -247,3 +247,43 @@ def test_the_configured_voice_is_one_the_api_accepts() -> None:
 
 def test_the_sample_rate_is_the_only_one_pcm_accepts() -> None:
     assert protocol.SAMPLE_RATE == 24_000
+
+
+# --- attaching to a call that is already up --------------------------------
+
+
+def test_attaching_to_a_call_prompts_the_model_to_speak() -> None:
+    """The model says nothing until asked. On a phone call that means the
+    caller hears an open line and silence, which is indistinguishable from
+    a broken system."""
+    rec = Recorder()
+    session = RealtimeSession(
+        api_key="k", server=FakeServer(), on_audio=rec.on_audio, call_id="rtc_123"
+    )
+
+    class FakeWS:
+        async def send(self, raw):
+            rec.sent.append(json.loads(raw))
+
+    async def scenario():
+        session._ws = FakeWS()
+        from orchestrator.voice.tools import ToolDispatcher, realtime_tools
+
+        session._dispatcher = ToolDispatcher(session.server)
+        # The tail of connect() that runs once attached.
+        session.configured.set()
+        await session._send({"type": protocol.RESPONSE_CREATE})
+
+    run(scenario())
+    assert rec.sent[-1]["type"] == protocol.RESPONSE_CREATE
+
+
+def test_unhandled_events_are_visible_at_debug(session, caplog) -> None:
+    """Silently dropping them left no way to tell 'the API sent nothing'
+    from 'the API sent something we ignore'."""
+    import logging
+
+    s, _ = session
+    with caplog.at_level(logging.DEBUG, logger="orchestrator.voice"):
+        run(s.handle_event({"type": "response.output_item.added"}))
+    assert "response.output_item.added" in caplog.text

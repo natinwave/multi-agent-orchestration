@@ -498,3 +498,27 @@ def test_a_secret_pasted_without_the_prefix_still_works() -> None:
     sig, ts = sign(body)
     bare = SECRET.removeprefix("whsec_")
     assert verify_signature(body, sig, ts, bare, webhook_id=WID) is True
+
+
+# --- the call has to be configured to speak --------------------------------
+
+
+def test_the_accept_payload_asks_for_turn_detection() -> None:
+    """Without it the model never decides the caller has finished talking,
+    so it never answers: an open line, total silence, and nothing in the
+    log to explain it."""
+    from orchestrator.voice.sip import accept_payload
+
+    payload = accept_payload("hi", [], "gpt-realtime-2.1", "marin")
+    assert payload["audio"]["input"]["turn_detection"]["type"]
+
+
+def test_the_accept_payload_carries_instructions_and_tools() -> None:
+    """A SIP call is already up when we attach, so there is no window to
+    send session.update afterwards -- this is the only chance."""
+    from orchestrator.voice.sip import accept_payload
+
+    payload = accept_payload("be brief", [{"type": "function", "name": "ask"}], "m", "marin")
+    assert payload["instructions"] == "be brief"
+    assert payload["tools"][0]["name"] == "ask"
+    assert payload["audio"]["output"]["voice"] == "marin"
