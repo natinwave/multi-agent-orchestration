@@ -282,9 +282,51 @@ now, end the job.
 
 ---
 
+## Profiles and instances
+
+An agent in the registry is a **kind**: an image, a model, a system
+prompt, the credentials it may use. Any number of jobs run against one at
+the same time — each gets its own worktree and its own detached process,
+so five concurrent jobs of the same kind do not collide. That part is
+inherent to the design rather than a feature added later.
+
+Three things make it usable as a fleet:
+
+**`extends`** — a second kind is a few lines, not a copy:
+
+```toml
+[agents.reviewer]
+extends = "claude-code"
+description = "Reads a change and reports on it. Never edits."
+max_concurrent = 2
+```
+
+Anything the child names wins; the rest is inherited. Chains work, cycles
+are refused rather than followed — the alternative is a hang at startup
+with nothing to read.
+
+**`isolation`** — whether concurrent instances share a container:
+
+| | |
+|---|---|
+| `shared` (default) | `docker exec` into one long-lived container. Cheapest, and what the pre-baked toolchain is for. Jobs of the same kind can see each other's files. |
+| `per_job` | a fresh container from `image`, removed afterwards. Costs a container *start*, not an install — the toolchain is already in the image, which is what the brief's "no reinstalling dependencies" was protecting. Concurrent jobs cannot see each other at all. |
+
+A per-job container keeps the same posture as the long-lived one —
+`cap-drop ALL`, `no-new-privileges`, no docker socket — and gets the same
+identical-path bind, because worktrees resolve only if host and container
+agree on the path. Stopping such a job removes the container, since the
+container *is* the job.
+
+**`max_concurrent`** — a ceiling per kind, so an enthusiastic afternoon
+does not put twenty agents on one desktop. Over the limit, `ask()` refuses
+and says so; it does not queue. A job that never starts and says nothing
+is the failure this whole design is against.
+
 ## Concurrency
 
-One persistent container per agent slot, one git worktree per job.
+One persistent container per agent slot by default, one git worktree per
+job.
 
 Containers are long-lived and carry the toolchain, so a job costs a
 `docker exec`, not an image pull and an `npm install`. `~/.claude/settings.json`
@@ -618,7 +660,7 @@ about any of it:
 What *is* covered off-host, and is worth running before you push:
 
 ```sh
-.venv/bin/python -m pytest -q          # 599 tests
+.venv/bin/python -m pytest -q          # 619 tests
 ./scripts/check-no-secrets.sh
 docker compose -f docker/docker-compose.yml config     # schema only
 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \

@@ -77,10 +77,13 @@ class ContainerBackend:
         config: Config,
         resume: bool = False,
     ) -> Outcome:
-        if not agent.container:
+        if agent.isolation == "per_job":
+            if not agent.image:
+                raise BackendError(f"agent {agent.name}: per_job isolation needs an image")
+        elif not agent.container:
             raise BackendError(f"agent {agent.name}: no container configured")
 
-        cmd = self.docker_command(agent, meta, paths, workdir, resume=resume)
+        cmd = self.docker_command(agent, meta, paths, workdir, resume=resume, config=config)
 
         # The prompt goes in on stdin, never on the command line: a command
         # line is visible to every process on the host via ps, and lands in
@@ -117,6 +120,15 @@ class ContainerBackend:
         exact target -- far better than killing every claude in there,
         since other jobs for the same agent share the container.
         """
+        if agent.isolation == "per_job":
+            # The whole container is this job, so stopping it is the kill.
+            subprocess.run(
+                ["docker", "rm", "--force", f"orch-{agent.name}-{meta.job_id}"],
+                capture_output=True,
+                timeout=30,
+                check=False,
+            )
+            return
         if not agent.container:
             return
         subprocess.run(
@@ -135,6 +147,7 @@ class ContainerBackend:
         paths: JobPaths,
         workdir: Path,
         resume: bool = False,
+        config: Config | None = None,
     ) -> list[str]:
         inner = self.inner_script(agent, meta, workdir, resume=resume)
         env_flags: list[str] = []
@@ -144,6 +157,10 @@ class ContainerBackend:
         # path, not a secret.
         env_flags += ["--env", f"ORCH_JOB_DIR={paths.root}"]
         env_flags += ["--env", f"ORCH_JOB_ID={meta.job_id}"]
+
+        if agent.isolation == "per_job":
+            return self._run_command(agent, meta, workdir, env_flags, inner, config)
+
         return [
             "docker",
             "exec",
@@ -155,6 +172,56 @@ class ContainerBackend:
             "bash",
             "-lc",
             inner,
+        ]
+
+    def _run_command(
+        self,
+        agent: Agent,
+        meta: Meta,
+        workdir: Path,
+        env_flags: list[str],
+        inner: str,
+        config: Config | None,
+    ) -> list[str]:
+        """A fresh container for this job alone.
+
+        The image already carries the toolchain, so this costs a container
+        start rather than an install -- the thing the shared container
+        exists to avoid is unaffected. What it buys is that two jobs of the
+        same kind cannot see each other's files, home directory or running
+        processes.
+
+        The mounts are rebuilt here rather than read from compose, so this
+        and docker-compose.yml have to agree. They are the same three:
+        the identical-path bind that makes worktrees resolve, /workspace,
+        and this agent's own secrets, read-only.
+        """
+        root = str(config.root) if config else "/srv/orchestration"
+        mounts = [
+            "--volume", f"{root}:{root}",
+            "--volume", f"{root}/worktrees:/workspace",
+        ]
+        if agent.secrets_dir:
+            mounts += ["--volume", f"{agent.secrets_dir}:/run/secrets:ro"]
+
+        return [
+            "docker", "run",
+            "--rm",
+            "--interactive",
+            # Named after the job, so `docker ps` during a busy afternoon
+            # says which agent is doing what rather than listing hashes.
+            "--name", f"orch-{agent.name}-{meta.job_id}",
+            "--workdir", str(workdir),
+            # The same posture as the long-lived container: nothing here
+            # needs to gain privileges, and an agent runs model-authored
+            # commands by design.
+            "--cap-drop", "ALL",
+            "--security-opt", "no-new-privileges",
+            "--add-host", "host.docker.internal:host-gateway",
+            *mounts,
+            *env_flags,
+            agent.image or "",
+            "bash", "-lc", inner,
         ]
 
     def inner_script(

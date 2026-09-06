@@ -76,6 +76,16 @@ class AmbiguousRepo(KeyError):
         self.query, self.candidates = query, candidates
 
 
+#: Fields an agent inherits from the one it extends. Everything an agent
+#: names itself wins; this is what it gets for free.
+INHERITABLE = (
+    "type", "description", "container", "image", "isolation", "max_concurrent",
+    "command", "session_flags", "resume_flags", "system_prompt_flags",
+    "secrets_dir", "base_url", "model", "api_key_file", "harness_arn",
+    "region", "default_repo", "needs_repo", "timeout_seconds", "max_tokens",
+)
+
+
 @dataclass(frozen=True)
 class Agent:
     name: str
@@ -83,6 +93,16 @@ class Agent:
     description: str = ""
     # container backend
     container: str | None = None
+    #: The image to start for a per-job container. Unused when instances
+    #: share one long-lived container.
+    image: str | None = None
+    #: "shared"  -- exec into one long-lived container (cheapest, and what
+    #:             the toolchain is pre-baked for)
+    #: "per_job" -- a fresh container per job from `image`, so concurrent
+    #:             instances of the same kind cannot see each other
+    isolation: str = "shared"
+    #: How many jobs of this kind may run at once. 0 means no limit.
+    max_concurrent: int = 0
     command: tuple[str, ...] = ()
     # How this particular CLI is told to start a session, resume one, and
     # take a system prompt. Config rather than code, because every agentic
@@ -240,6 +260,41 @@ class Config:
         raise UnknownRepo(query, sorted(self.repos))
 
 
+def _resolve_inheritance(raw: dict) -> dict:
+    """Fold `extends` into each agent's own settings.
+
+    A second agent of the same kind should be three lines -- a name, what
+    it extends, and whatever differs -- not a copy of twenty. Anything an
+    agent names itself wins; the rest comes from its parent.
+
+    Chains work. Cycles are refused rather than followed, because the
+    alternative is a hang at startup with nothing to read.
+    """
+    resolved: dict[str, dict] = {}
+
+    def fold(name: str, seen: tuple[str, ...] = ()) -> dict:
+        if name in resolved:
+            return resolved[name]
+        if name in seen:
+            cycle = " -> ".join([*seen, name])
+            raise ConfigError(f"agents: extends forms a cycle: {cycle}")
+        spec = dict(raw[name])
+        parent = spec.pop("extends", None)
+        if parent:
+            if parent not in raw:
+                raise ConfigError(
+                    f"agents.{name}: extends {parent!r}, which is not an agent"
+                )
+            inherited = {
+                k: v for k, v in fold(parent, (*seen, name)).items() if k in INHERITABLE
+            }
+            spec = {**inherited, **spec}
+        resolved[name] = spec
+        return spec
+
+    return {name: fold(name) for name in raw}
+
+
 def _require(table: dict, key: str, where: str) -> object:
     if key not in table:
         raise ConfigError(f"{where}: missing required key {key!r}")
@@ -265,6 +320,8 @@ def load(config_dir: Path | None = None, root_override: Path | None = None) -> C
         raise ConfigError(f"{config_dir / 'agents.toml'}: no agents defined")
 
     known_fields = set(Agent.__dataclass_fields__) - {"name"}
+    agents_raw = _resolve_inheritance(agents_raw)
+
     agents: dict[str, Agent] = {}
     for name, spec in agents_raw.items():
         where = f"agents.{name}"
@@ -284,6 +341,14 @@ def load(config_dir: Path | None = None, root_override: Path | None = None) -> C
             _require(spec, "harness_arn", where)
         else:
             raise ConfigError(f"{where}: unknown type {kind!r}")
+
+        if kind == "container" and spec.get("isolation", "shared") == "per_job":
+            _require(spec, "image", where)
+        if spec.get("isolation", "shared") not in {"shared", "per_job"}:
+            raise ConfigError(
+                f"{where}: isolation must be 'shared' or 'per_job', "
+                f"not {spec['isolation']!r}"
+            )
         spec = dict(spec)
         for list_field in ("command", "session_flags", "resume_flags", "system_prompt_flags"):
             if list_field in spec:

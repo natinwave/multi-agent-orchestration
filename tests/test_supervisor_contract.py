@@ -616,3 +616,68 @@ def test_a_stopped_job_can_then_be_reaped(sup_slow: Supervisor) -> None:
     wait_until_running(sup_slow, job_id)
     sup_slow.stop(job_id)
     assert sup_slow.reap(job_id)["reaped"] is True
+
+
+# --- how many of one kind at once -------------------------------------------
+
+
+def test_the_concurrency_limit_is_enforced(tmp_path: Path, slow_model: str) -> None:
+    """Refusing beats queueing silently: a job that never starts and says
+    nothing is the failure this design is against."""
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "agents.toml").write_text(
+        f'[agents.hermes]\ntype = "http_openai"\nbase_url = "{slow_model}"\n'
+        f'model = "hermes"\nneeds_repo = false\nmax_concurrent = 2\n'
+    )
+    (cfg / "repos.toml").write_text('[repos.main]\nurl = "https://h/o/m.git"\n')
+    (cfg / "orchestrator.toml").write_text(
+        f'[paths]\nroot = "{tmp_path / "srv"}"\n'
+        f'[credentials]\nsecrets_root = "{tmp_path / "secrets"}"\n'
+    )
+    sup = Supervisor.create(config=load(cfg, tmp_path / "srv"), environ={})
+
+    started = [sup.ask("hermes", f"slow {i}")["job_id"] for i in range(2)]
+    for job_id in started:
+        wait_until_running(sup, job_id)
+
+    refused = sup.ask("hermes", "one too many")
+    assert refused["error"] == "at_capacity"
+    assert refused["limit"] == 2
+    assert refused["running"] == 2
+
+    sup.stop(started[0])
+    assert "error" not in sup.ask("hermes", "now there is room")
+
+    for job_id in started[1:]:
+        sup.stop(job_id)
+
+
+def test_finished_jobs_do_not_count_against_the_limit(sup: Supervisor) -> None:
+    job_id = sup.ask("hermes", "quick")["job_id"]
+    wait_for_terminal(sup, job_id)
+    assert "error" not in sup.ask("hermes", "another")
+
+
+def test_one_agents_jobs_do_not_limit_another(tmp_path: Path, slow_model: str) -> None:
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "agents.toml").write_text(
+        f'[agents.busy]\ntype = "http_openai"\nbase_url = "{slow_model}"\n'
+        f'model = "m"\nneeds_repo = false\nmax_concurrent = 1\n\n'
+        f'[agents.spare]\ntype = "http_openai"\nbase_url = "{slow_model}"\n'
+        f'model = "m"\nneeds_repo = false\n'
+    )
+    (cfg / "repos.toml").write_text('[repos.main]\nurl = "https://h/o/m.git"\n')
+    (cfg / "orchestrator.toml").write_text(
+        f'[paths]\nroot = "{tmp_path / "srv"}"\n'
+        f'[credentials]\nsecrets_root = "{tmp_path / "secrets"}"\n'
+    )
+    sup = Supervisor.create(config=load(cfg, tmp_path / "srv"), environ={})
+
+    busy = sup.ask("busy", "slow")["job_id"]
+    wait_until_running(sup, busy)
+    assert sup.ask("busy", "blocked")["error"] == "at_capacity"
+    assert "error" not in sup.ask("spare", "unaffected")
+
+    sup.stop(busy)

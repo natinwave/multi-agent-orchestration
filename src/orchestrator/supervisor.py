@@ -141,6 +141,22 @@ class Supervisor:
                 }
             )
 
+        running = self._running_for(agent)
+        if agent_spec.max_concurrent and running >= agent_spec.max_concurrent:
+            # Refusing beats queueing silently: a job that never starts and
+            # says nothing is the failure this whole design is against.
+            return self._out(
+                {
+                    "error": "at_capacity",
+                    "message": (
+                        f"{agent} already has {running} job(s) running, which is "
+                        f"its limit. Stop one, or wait."
+                    ),
+                    "running": running,
+                    "limit": agent_spec.max_concurrent,
+                }
+            )
+
         job_id, job_root = ids.allocate(self.config.jobs_dir, ids.load_wordlist())
         paths = JobPaths(job_root)
 
@@ -556,6 +572,11 @@ class Supervisor:
         this module's source.
         """
         return self.redactor.scrub_obj(payload)  # type: ignore[return-value]
+
+    def _running_for(self, agent: str) -> int:
+        """How many jobs of this kind are live right now."""
+        listing = self.list_jobs(active_only=True, limit=1000)
+        return sum(1 for job in listing.get("jobs", []) if job.get("agent") == agent)
 
     def _paths(self, job_id: str) -> JobPaths | None:
         # job_id arrives from an MCP client and is about to be joined onto a

@@ -7,6 +7,22 @@
 # NO SECRET VALUES HERE. `secrets_dir` names a host directory that
 # bootstrap.sh fills from 1Password; the container mounts only its own.
 
+# A "kind" of agent is a profile: an image, a model, a system prompt, the
+# credentials it may use. Any number of jobs can run against one at the
+# same time -- each gets its own git worktree and its own process, so five
+# concurrent jobs on the same profile do not collide.
+#
+# `extends` means a second kind is a few lines rather than a copy. See the
+# commented reviewer below.
+#
+# `isolation` decides whether those concurrent jobs share a container:
+#   shared  (default) -- exec into one long-lived container. Cheapest, and
+#                        what the pre-baked toolchain is for. Jobs of the
+#                        same kind can see each other's files.
+#   per_job           -- a fresh container from `image` per job, torn down
+#                        after. Costs a container start, not an install.
+#                        Concurrent jobs cannot see each other at all.
+
 [agents.claude-code]
 type = "container"
 description = "Coding work: reading, editing and testing code in a repository. Runs sandboxed in a container, so it works autonomously but cannot reach the machine itself. The default choice for anything involving files."
@@ -37,6 +53,11 @@ resume_flags = ["--resume", "{session_id}"]
 system_prompt_flags = ["--append-system-prompt-file", "{agent_prompt}"]
 # Wall-clock ceiling. Long-horizon work, so this is generous.
 timeout_seconds = 14400
+# How many at once. 0 is unlimited; a number stops an enthusiastic
+# afternoon from putting twenty agents on one desktop. Refused outright
+# rather than queued: a job that never starts and says nothing is the
+# failure this design is against.
+max_concurrent = 4
 
 [agents.hermes]
 type = "http_openai"
@@ -123,3 +144,24 @@ region = "us-east-1"
 secrets_dir = "/run/orchestration/secrets/agentcore"
 needs_repo = false
 timeout_seconds = 600
+
+# A second kind of coding agent, defined by what differs from the first.
+# Everything else -- image, container, secrets, flags, timeout -- comes
+# from claude-code. Uncomment to enable.
+#
+# [agents.reviewer]
+# extends = "claude-code"
+# description = "Reads a change and reports on it. Never edits: give it a branch and ask what is wrong with it."
+# system_prompt_flags = ["--append-system-prompt-file", "{agent_prompt}", "--append-system-prompt", "You are reviewing, not editing. Do not modify files."]
+# max_concurrent = 2
+
+# The same kind, but every job in a container of its own -- nothing shared
+# between concurrent instances. Costs a container start per job; the
+# toolchain is already in the image, so nothing is installed.
+#
+# [agents.isolated]
+# extends = "claude-code"
+# description = "Coding work in a throwaway container of its own. Use when two jobs must not see each other."
+# isolation = "per_job"
+# image = "orchestration/claude-code:latest"
+# max_concurrent = 3
