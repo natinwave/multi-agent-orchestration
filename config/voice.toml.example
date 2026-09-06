@@ -43,6 +43,13 @@ discord_channel_id = 0
 model = "gpt-realtime-2.1"
 voice = "marin"
 
+# Require a spoken "yes" before a credential is handed to an agent. Off:
+# the read-back-and-confirm exchange is rote when you trust the model to
+# interpret the request, and the half that catches a mistake is being told
+# what happened -- which the tool description requires either way. Turn it
+# on if you would rather be asked.
+confirm_grants = false
+
 # Mention it when a job finishes, fails, or needs an answer, rather than
 # waiting to be asked. Only those transitions -- progress for its own sake
 # is not worth interrupting a conversation for -- and never while the

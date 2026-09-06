@@ -77,14 +77,37 @@ def test_descriptions_are_reused_not_rewritten(server) -> None:
     """They are prompt surface written once in mcp_server.py; a second copy
     here would drift."""
     tools = {t["name"]: t["description"] for t in asyncio.run(realtime_tools(server))}
-    assert "WAIT FOR THE USER" in tools["grant"]
+    assert "ALWAYS SAY WHAT YOU GRANTED" in tools["grant"]
+
+
+def test_the_grant_description_demands_a_report(server) -> None:
+    """With the confirmation step gone, this sentence is the whole control:
+    it is how a misheard request gets caught."""
+    tools = {t["name"]: t["description"] for t in asyncio.run(realtime_tools(server))}
+    grant = tools["grant"]
+    assert "ALWAYS SAY WHAT YOU GRANTED" in grant
+    assert "not optional" in grant
+    assert "never speculatively" in grant.lower()
 
 
 # --- the grant guard -------------------------------------------------------
 
 
+def test_by_default_a_grant_happens_at_once() -> None:
+    """The owner's call, made after living with the two-step: the rote
+    read-back is friction when you trust the model to interpret the
+    request, and being *told* what happened is the half that catches a
+    mistake. That half is required by the tool description instead."""
+    assert GrantGuard().check("grant", {"agent": "hermes", "credential": "x"}) is None
+
+
+def test_the_two_step_can_be_turned_back_on() -> None:
+    held = GrantGuard(enabled=True).check("grant", {"agent": "hermes", "credential": "x"})
+    assert held is not None and held["status"] == "needs_confirmation"
+
+
 def test_the_first_grant_never_grants() -> None:
-    guard = GrantGuard()
+    guard = GrantGuard(enabled=True)
     held = guard.check("grant", {"agent": "hermes", "credential": "staging password"})
     assert held is not None
     assert held["status"] == "needs_confirmation"
@@ -92,7 +115,7 @@ def test_the_first_grant_never_grants() -> None:
 
 
 def test_an_identical_second_call_is_allowed() -> None:
-    guard = GrantGuard()
+    guard = GrantGuard(enabled=True)
     args = {"agent": "hermes", "credential": "staging password"}
     guard.check("grant", args)
     assert guard.check("grant", args) is None
@@ -100,7 +123,7 @@ def test_an_identical_second_call_is_allowed() -> None:
 
 def test_confirmation_is_consumed_not_reusable() -> None:
     """A single spoken yes authorises exactly one grant."""
-    guard = GrantGuard()
+    guard = GrantGuard(enabled=True)
     args = {"agent": "hermes", "credential": "staging password"}
     guard.check("grant", args)
     assert guard.check("grant", args) is None
@@ -108,14 +131,14 @@ def test_confirmation_is_consumed_not_reusable() -> None:
 
 
 def test_confirming_one_credential_does_not_authorise_another() -> None:
-    guard = GrantGuard()
+    guard = GrantGuard(enabled=True)
     guard.check("grant", {"agent": "hermes", "credential": "staging password"})
     held = guard.check("grant", {"agent": "hermes", "credential": "production key"})
     assert held is not None, "a yes for staging must not release production"
 
 
 def test_confirming_for_one_agent_does_not_authorise_another() -> None:
-    guard = GrantGuard()
+    guard = GrantGuard(enabled=True)
     guard.check("grant", {"agent": "hermes", "credential": "staging password"})
     held = guard.check("grant", {"agent": "claude-code", "credential": "staging password"})
     assert held is not None
@@ -125,7 +148,7 @@ def test_confirmation_expires() -> None:
     """An approval must not sit around waiting to be used ten minutes into
     a different conversation."""
     clock = FakeClock()
-    guard = GrantGuard(_clock=clock)
+    guard = GrantGuard(enabled=True, _clock=clock)
     args = {"agent": "hermes", "credential": "staging password"}
     guard.check("grant", args)
     clock.advance(CONFIRM_WINDOW_SECONDS + 1)
@@ -134,7 +157,7 @@ def test_confirmation_expires() -> None:
 
 def test_confirmation_survives_a_normal_pause() -> None:
     clock = FakeClock()
-    guard = GrantGuard(_clock=clock)
+    guard = GrantGuard(enabled=True, _clock=clock)
     args = {"agent": "hermes", "credential": "staging password"}
     guard.check("grant", args)
     clock.advance(20)
@@ -145,7 +168,7 @@ def test_matching_ignores_case_and_job_scope() -> None:
     """Re-asking because the model capitalised differently, or added the
     job scope on the second call, would teach the user that confirmations
     are noise to be talked through."""
-    guard = GrantGuard()
+    guard = GrantGuard(enabled=True)
     guard.check("grant", {"agent": "Hermes", "credential": "Staging Password"})
     allowed = guard.check(
         "grant", {"agent": "hermes", "credential": "staging password", "job_id": "kestrel"}
@@ -154,7 +177,7 @@ def test_matching_ignores_case_and_job_scope() -> None:
 
 
 def test_reading_tools_are_never_gated() -> None:
-    guard = GrantGuard()
+    guard = GrantGuard(enabled=True)
     for name in ("ask", "check", "list_jobs", "list_credentials", "revoke"):
         assert guard.check(name, {"agent": "hermes"}) is None
 
@@ -162,11 +185,11 @@ def test_reading_tools_are_never_gated() -> None:
 def test_revoke_is_deliberately_not_gated() -> None:
     """Withdrawing access is the safe direction. Making someone confirm it
     twice would slow down the one action you might need in a hurry."""
-    assert GrantGuard().check("revoke", {"agent": "hermes"}) is None
+    assert GrantGuard(enabled=True).check("revoke", {"agent": "hermes"}) is None
 
 
 def test_forget_clears_pending_confirmations() -> None:
-    guard = GrantGuard()
+    guard = GrantGuard(enabled=True)
     args = {"agent": "hermes", "credential": "staging password"}
     guard.check("grant", args)
     guard.forget()
@@ -187,8 +210,8 @@ def test_a_read_tool_round_trips(server) -> None:
 
 
 def test_a_held_grant_does_not_reach_the_supervisor(server, tmp_path: Path) -> None:
-    """The guard has to run before the call, not after it."""
-    dispatcher = ToolDispatcher(server)
+    """When the two-step is on, the guard has to run before the call."""
+    dispatcher = ToolDispatcher(server, guard=GrantGuard(enabled=True))
     result = call(dispatcher, "grant", {"agent": "hermes", "credential": "anything"})
     assert result["status"] == "needs_confirmation"
     assert not (tmp_path / "secrets").exists()

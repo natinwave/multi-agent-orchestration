@@ -31,8 +31,16 @@ def test_it_starts_jobs_without_asking() -> None:
     assert "Start jobs without asking" in INSTRUCTIONS
 
 
-def test_it_treats_hesitation_as_refusal_for_grants() -> None:
-    assert "treat it as no" in INSTRUCTIONS
+def test_it_must_report_every_credential_it_shares() -> None:
+    """The confirmation step is gone at the owner's request, so this is the
+    control that replaces it."""
+    assert "say plainly what you did" in INSTRUCTIONS
+    assert "Every time, unprompted" in INSTRUCTIONS
+
+
+def test_it_shares_only_what_was_asked_for() -> None:
+    assert "Never speculatively" in INSTRUCTIONS
+    assert "not sure which credential" in INSTRUCTIONS
 
 
 def test_it_explains_what_redacted_means() -> None:

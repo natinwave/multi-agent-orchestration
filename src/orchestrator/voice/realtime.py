@@ -21,7 +21,7 @@ from typing import Any
 
 from . import protocol
 from .prompt import build_instructions
-from .tools import ToolDispatcher, realtime_tools
+from .tools import GrantGuard, ToolDispatcher, realtime_tools
 
 __all__ = ["RealtimeSession", "AudioSink"]
 
@@ -46,6 +46,10 @@ class RealtimeSession:
     #: accepted, so there is no session.update to send and no audio to
     #: carry -- OpenAI bridges that to the phone itself.
     call_id: str | None = None
+    #: Require a spoken confirmation before a credential is handed over.
+    #: Off by default: being told what was granted is what catches a
+    #: mistake, and it happens either way.
+    confirm_grants: bool = False
 
     #: Set once the API acknowledges our session.update.
     configured: asyncio.Event = field(default_factory=asyncio.Event, repr=False)
@@ -69,7 +73,9 @@ class RealtimeSession:
         headers = {"Authorization": f"Bearer {self.api_key}"}
 
         self._ws = await websockets.connect(url, additional_headers=headers)
-        self._dispatcher = ToolDispatcher(self.server)
+        self._dispatcher = ToolDispatcher(
+            self.server, guard=GrantGuard(enabled=self.confirm_grants)
+        )
         tools = await realtime_tools(self.server)
 
         if self.call_id:

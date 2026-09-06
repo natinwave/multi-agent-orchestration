@@ -52,20 +52,25 @@ class _Pending:
 
 @dataclass
 class GrantGuard:
-    """Requires a credential grant to be asked for twice.
+    """Optionally requires a credential grant to be asked for twice.
 
-    The user chose to let the voice agent start jobs freely but to confirm
-    every credential. Enforcing that in the prompt alone would mean a
-    misheard sentence could hand out a live secret, so it is enforced here:
-    the first call to ``grant`` never grants anything. It returns the
-    sentence the model should say, and only an identical call inside
-    :data:`CONFIRM_WINDOW_SECONDS` is allowed through.
+    Off by default, at the owner's request after living with it: the
+    read-back-and-confirm exchange is rote when you trust the model to
+    interpret "give the coding agent the staging password" correctly, and
+    the useful half is being *told* what happened, not being asked first.
+    That half is not optional -- the tool description requires the model to
+    state exactly what it granted, to whom, and for how long, so a
+    misinterpretation is caught immediately rather than never.
 
-    "Identical" is deliberate. Confirming a grant of the staging password
-    to hermes does not authorise granting the production key, or granting
-    the same key to a different agent.
+    Turning it on restores the two-step: the first call to ``grant`` never
+    grants anything, it returns the sentence to say, and only an identical
+    call inside :data:`CONFIRM_WINDOW_SECONDS` is allowed through.
+    "Identical" is deliberate -- confirming the staging password for hermes
+    would not release the production key, or the same key to another agent.
     """
 
+    #: Whether to require the two-step. Off means a grant happens at once.
+    enabled: bool = False
     window: float = CONFIRM_WINDOW_SECONDS
     _pending: dict[str, _Pending] = field(default_factory=dict, repr=False)
     _clock: Any = time.monotonic
@@ -81,7 +86,7 @@ class GrantGuard:
 
     def check(self, name: str, args: dict) -> dict | None:
         """Return a response to send instead of calling, or None to allow."""
-        if name not in CONFIRMED_TOOLS:
+        if not self.enabled or name not in CONFIRMED_TOOLS:
             return None
 
         key = self._key(name, args)

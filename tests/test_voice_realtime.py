@@ -168,8 +168,19 @@ def test_a_response_with_no_tool_calls_sends_nothing(session) -> None:
     assert rec.sent == []
 
 
-def test_a_grant_is_held_by_the_guard_before_reaching_the_supervisor(session) -> None:
+def test_a_grant_goes_straight_through_by_default(session) -> None:
+    """One step, at the owner's request. The control is the tool
+    description requiring the model to report what it shared."""
     s, rec = session
+    run(s.handle_event(make_response_done("grant", {"agent": "hermes", "credential": "x"})))
+    assert s.server.calls == [("grant", {"agent": "hermes", "credential": "x"})]
+
+
+def test_a_grant_is_held_when_confirmation_is_turned_on(session) -> None:
+    from orchestrator.voice.tools import GrantGuard, ToolDispatcher
+
+    s, rec = session
+    s._dispatcher = ToolDispatcher(s.server, guard=GrantGuard(enabled=True))
     run(s.handle_event(make_response_done("grant", {"agent": "hermes", "credential": "x"})))
     assert s.server.calls == [], "the first grant must not execute"
     output = json.loads(rec.sent[0]["item"]["output"])

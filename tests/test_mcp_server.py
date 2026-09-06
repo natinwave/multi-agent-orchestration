@@ -52,11 +52,14 @@ def call(server, name: str, args: dict) -> dict:
     return json.loads(result.content[0].text)
 
 
-def test_grant_tells_the_model_to_get_permission_first(server) -> None:
-    """The docstring is the only thing standing between a spoken "sure" and
-    a live secret going to a process that runs model-authored commands."""
+def test_grant_requires_the_model_to_report_what_it_shared(server) -> None:
+    """With the confirmation step removed at the owner's request, this
+    sentence is the whole control: it is how a misheard request gets
+    caught, and it is the only chance to catch one."""
     (grant,) = [t for t in asyncio.run(server[0].list_tools()) if t.name == "grant"]
-    assert "WAIT FOR THE USER" in (grant.description or "")
+    description = grant.description or ""
+    assert "ALWAYS SAY WHAT YOU GRANTED" in description
+    assert "not optional" in description
 
 
 def test_credential_listing_advertises_that_it_returns_no_values(server) -> None:

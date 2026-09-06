@@ -231,7 +231,7 @@ class Supervisor:
             agent_spec = self.config.agent(meta.agent)
         except UnknownAgent as exc:
             return self._out({"error": "unknown_agent", "message": str(exc), "known": exc.known})
-        if agent_spec.type == "container" and not agent_spec.can_resume:
+        if agent_spec.type in {"container", "local"} and not agent_spec.can_resume:
             return self._out(
                 {
                     "error": "cannot_resume",

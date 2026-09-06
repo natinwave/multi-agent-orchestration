@@ -272,6 +272,8 @@ def load(config_dir: Path | None = None, root_override: Path | None = None) -> C
         if kind == "container":
             _require(spec, "container", where)
             _require(spec, "command", where)
+        elif kind == "local":
+            _require(spec, "command", where)
         elif kind == "http_openai":
             _require(spec, "base_url", where)
             _require(spec, "model", where)

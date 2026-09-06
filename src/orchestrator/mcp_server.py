@@ -123,22 +123,28 @@ def build_server(sup: Supervisor) -> MCPServer:
 
     @server.tool()
     def grant(agent: str, credential: str, job_id: str | None = None) -> dict:
-        """Give one agent access to one credential.
+        """Give one agent access to one credential, when asked to.
 
-        SAY WHAT YOU ARE ABOUT TO GRANT, TO WHOM, AND WAIT FOR THE USER TO
-        AGREE BEFORE CALLING THIS. It hands a live secret to a process that
-        runs model-authored commands. Never call it speculatively, never to
-        "just in case" an agent might need something, and never in the same
-        breath as ask().
+        ALWAYS SAY WHAT YOU GRANTED, TO WHOM, AND FOR HOW LONG. Name the
+        credential and the agent in your reply, every time, without being
+        asked. That sentence is the only thing standing between a
+        misheard request and a secret going somewhere it should not, so it
+        is not optional and it is not a summary -- "gave claude-code the
+        staging database password, just for this job".
 
-        credential: what the user called it. Ambiguity returns candidates
-            rather than picking one -- read those back and ask which.
-        job_id: scope the grant to one job, so it is withdrawn when that
-            job ends. Prefer this whenever the credential is for a specific
-            piece of work.
+        Grant only what was actually asked for. Never speculatively, never
+        "in case it needs it", never in the same breath as ask(). If you
+        are unsure which credential was meant, ask before calling rather
+        than guessing: ambiguity returns candidates, and reading those back
+        is the right move.
+
+        credential: what the user called it, in their words.
+        job_id: scope it to one job so it is withdrawn when that job ends.
+            Prefer this whenever the credential is for a specific piece of
+            work, which is nearly always.
 
         Returns the environment variable the agent will find it in; tell
-        the agent that name, not the value, which you never see.
+        the agent that name, never the value, which you never see.
         """
         return sup.grant(agent=agent, credential=credential, job_id=job_id)
 

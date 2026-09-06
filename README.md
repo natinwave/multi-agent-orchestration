@@ -516,6 +516,20 @@ harness a code change the first time.
 
 `config/agents.toml` carries a commented `codex` entry as a worked example.
 
+**An agent on the bare host** is `type = "local"`. For work that genuinely
+needs the machine — bringing a compose stack up, reaching files outside a
+worktree, using something installed here and not in the image. Same
+worktree, same narration, same per-agent credentials read at exec time;
+what changes is that there is no boundary around it.
+
+So it does **not** get `--dangerously-skip-permissions`. That flag is
+acceptable where the blast radius is a container, and an agent with
+neither a boundary nor permission checks is a different thing from what
+this is. A local agent runs `--permission-mode acceptEdits` with an
+explicit `--allowedTools` list, and the backend refuses the dangerous flag
+outright rather than honouring it quietly. `config/agents.toml` has a
+commented example.
+
 **An OpenAI-compatible API needs nothing at all** — `base_url`, `model`,
 done, like `hermes`. But that backend is one request and one answer: no
 worktree, no tools, no file access. It answers questions; it does not do
@@ -545,7 +559,7 @@ about any of it:
 What *is* covered off-host, and is worth running before you push:
 
 ```sh
-.venv/bin/python -m pytest -q          # 548 tests
+.venv/bin/python -m pytest -q          # 569 tests
 ./scripts/check-no-secrets.sh
 docker compose -f docker/docker-compose.yml config     # schema only
 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \
@@ -778,17 +792,25 @@ The bridge is **its own identity**: the coding agents never see the OpenAI
 key, and it never sees their Claude token. Same per-directory scoping as
 everything else.
 
-### What is enforced rather than prompted
+### Sharing a credential
 
-You chose to let it start jobs freely but confirm every credential. A
-prompt is not a control, so `GrantGuard` makes the **first** call to
-`grant` never grant anything — it returns the sentence to say and waits for
-an identical call within two minutes. Confirming staging for `hermes` does
-not release production, or the same key to a different agent, and an
-approval is consumed rather than reusable.
+One step: ask, and it happens. The control is not a confirmation but a
+**report** — the tool description requires the model to say what it
+granted, to whom, and for how long, every time and unprompted. That
+sentence is how a misheard request gets caught, and it is the only chance
+to catch one.
 
-`revoke` is deliberately *not* gated. Withdrawing access is the safe
-direction and is the one thing you might need in a hurry.
+That is a deliberate change from the two-step it shipped with. Living with
+it, the read-back-and-confirm exchange was rote when you trust the model to
+interpret "give the coding agent the staging password" correctly, and the
+half that actually catches a mistake is being told what happened. Set
+`confirm_grants = true` in `config/voice.toml` to put the confirmation
+back: the first `grant` then returns a sentence to say and waits for an
+identical call within two minutes, where confirming staging for `hermes`
+does not release production or the same key to another agent.
+
+`revoke` is not gated either way. Withdrawing access is the safe direction
+and the one thing you might need in a hurry.
 
 ### Audio
 

@@ -108,6 +108,7 @@ async def run_sip(server, voice_cfg: dict, config, api_key: str) -> int:
             # OpenAI is carrying the audio; we only handle tools.
             on_audio=_ignore_audio,
             call_id=call_id,
+            confirm_grants=bool(voice_cfg.get("confirm_grants", False)),
         )
         watcher_task = None
         try:

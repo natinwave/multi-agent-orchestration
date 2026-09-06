@@ -65,3 +65,33 @@ max_tokens = 2048
 # command = ["codex", "exec", "--full-auto"]
 # system_prompt_flags = ["--instructions-file", "{agent_prompt}"]
 # timeout_seconds = 14400
+
+# An agent on the bare host, outside any container. For work that genuinely
+# needs the machine: bringing a compose stack up, reaching files outside a
+# worktree, using something installed here and not in the image.
+#
+# Note what is missing: --dangerously-skip-permissions. That is acceptable
+# where the blast radius is a container and nowhere else, so a local agent
+# gets acceptEdits and an explicit list of what else it may do. Add to
+# allowedTools deliberately; the backend refuses the dangerous flag outright.
+#
+# Uncomment to enable. It shares the claude-code identity's credentials by
+# default -- give it its own secrets_dir if you would rather it did not.
+#
+# [agents.local]
+# type = "local"
+# description = "Runs on the desktop itself. Full access, no container."
+# secrets_dir = "/run/orchestration/secrets/claude-code"
+# default_repo = "main"
+# needs_repo = true
+# command = [
+#   "claude", "-p",
+#   "--permission-mode", "acceptEdits",
+#   "--allowedTools", "Read Edit Write Glob Grep Bash(git *) Bash(docker *) Bash(python3 *)",
+#   "--output-format", "stream-json",
+#   "--verbose",
+# ]
+# session_flags = ["--session-id", "{session_id}"]
+# resume_flags = ["--resume", "{session_id}"]
+# system_prompt_flags = ["--append-system-prompt-file", "{agent_prompt}"]
+# timeout_seconds = 14400

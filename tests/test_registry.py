@@ -74,12 +74,28 @@ def test_shipped_config_loads() -> None:
 
 
 def test_shipped_config_keeps_dangerous_flag_inside_the_container_backend() -> None:
-    """--dangerously-skip-permissions is acceptable in a container and
-    nowhere else, so no http agent may carry it."""
+    """--dangerously-skip-permissions is acceptable where the blast radius
+    is a container and nowhere else. That mattered more once a local
+    backend existed: an agent on the bare host with no permission checks
+    either is a different thing from what this project set out to build."""
     cfg = load()
     for agent in cfg.agents.values():
         if agent.type != "container":
             assert "--dangerously-skip-permissions" not in agent.command
+
+
+def test_a_local_agent_type_is_accepted(tmp_path: Path) -> None:
+    agents = (
+        '[agents.desktop]\ntype = "local"\n'
+        'command = ["claude", "-p", "--permission-mode", "acceptEdits"]\n'
+    )
+    cfg = load(write_config(tmp_path, agents=agents))
+    assert cfg.agents["desktop"].type == "local"
+
+
+def test_a_local_agent_must_say_what_to_run(tmp_path: Path) -> None:
+    with pytest.raises(ConfigError, match="command"):
+        load(write_config(tmp_path, agents='[agents.desktop]\ntype = "local"\n'))
 
 
 def test_shipped_config_has_no_secret_values() -> None:
