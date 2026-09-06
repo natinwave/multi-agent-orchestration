@@ -250,3 +250,22 @@ def test_screening_without_a_secret_still_applies_the_whitelist() -> None:
     screen = CallScreen(allowed=(MINE,), signing_secret="")
     assert screen.screen(incoming(caller=MINE)).accept is True
     assert screen.screen(incoming(caller=THEIRS)).accept is False
+
+
+def test_a_declined_call_reports_the_digits_to_whitelist(caplog) -> None:
+    """The commonest first-run failure is a trunk presenting the number in
+    a shape the whitelist was not written for. The log has to say what to
+    copy, or the fix is guesswork."""
+    import logging
+
+    from orchestrator.voice.sip import SipListener
+
+    listener = SipListener(
+        CallScreen(allowed=("+15550000000",), signing_secret=""),
+        api_key="unused",
+        on_call=None,
+    )
+    decision = listener.screen_.screen(incoming(caller=MINE))
+    with caplog.at_level(logging.WARNING):
+        listener._decide(decision)
+    assert "4255551212" in caplog.text

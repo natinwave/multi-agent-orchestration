@@ -298,9 +298,15 @@ class SipListener:
         import asyncio
 
         if not decision.accept:
+            # The raw From header AND the digits it reduces to. A first
+            # call is often declined because the trunk presents the number
+            # in a shape the whitelist was not written for, and the fix is
+            # simply to copy the digits below into allowed_callers.
+            digits = normalise_number(decision.caller)
             log.warning(
-                "declined call from %s: %s",
+                "declined call from %s%s: %s",
                 decision.caller or "an unknown number",
+                f" (digits: {digits})" if digits else "",
                 decision.reason,
             )
             if decision.call_id:
