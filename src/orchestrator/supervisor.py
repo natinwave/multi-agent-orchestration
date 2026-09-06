@@ -14,16 +14,19 @@ there is no way around it.
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
+import signal
 import subprocess
 import sys
+import time
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
-from . import ids
+from . import backends, ids
 from .credentials import (
     AmbiguousCredential,
     CredentialError,
@@ -46,6 +49,8 @@ from .state import JobPaths, JobState, Meta, Status, pid_alive
 from .worktree import GitError, Workspace, prepare, remove
 
 __all__ = ["Supervisor", "SupervisorError"]
+
+log = logging.getLogger("orchestrator.supervisor")
 
 
 class SupervisorError(RuntimeError):
@@ -252,6 +257,121 @@ class Supervisor:
         Status(state=JobState.QUEUED).write(paths)
         pid = self._spawn_runner(paths, resume=True)
         return self._out({"job_id": job_id, "state": str(JobState.QUEUED), "runner_pid": pid})
+
+    def stop(self, job_id: str) -> dict:
+        """Stop a running job.
+
+        Two kills, because one is not enough. The runner is its own process
+        group leader, so signalling the group ends it and the `docker exec`
+        client with it -- but a docker exec leaves the process inside the
+        container running when its client dies, so the backend also reaches
+        in and ends the agent by its session id.
+        """
+        paths = self._paths(job_id)
+        if paths is None:
+            return self._out({"error": "unknown_job", "message": f"no job called {job_id!r}"})
+
+        status = self._reconciled(paths)
+        if status.state.is_terminal:
+            return self._out(
+                {
+                    "error": "already_finished",
+                    "message": f"{job_id} already {status.state}",
+                    "state": str(status.state),
+                }
+            )
+
+        meta = Meta.read(paths)
+        killed = self._kill_runner(status.runner_pid)
+
+        try:
+            agent_spec = self.config.agent(meta.agent)
+            backends.for_agent(agent_spec).stop(agent=agent_spec, meta=meta)
+        except Exception as exc:  # noqa: BLE001 - the job still stops
+            log.debug("backend stop failed for %s: %s", job_id, exc)
+
+        # Anything lent to this job goes back now rather than outliving it.
+        released = 0
+        try:
+            released = len(self.config.credential_store().revoke_for_job(job_id))
+        except Exception:  # noqa: BLE001
+            log.debug("could not release grants for %s", job_id, exc_info=True)
+
+        narrate(paths.narration, "stopped at your request")
+        Status(
+            state=JobState.STOPPED,
+            runner_pid=status.runner_pid,
+            exit_code=status.exit_code,
+            detail="stopped on request",
+        ).write(paths)
+
+        return self._out(
+            {
+                "job_id": job_id,
+                "state": str(JobState.STOPPED),
+                "runner_stopped": killed,
+                "credentials_released": released,
+            }
+        )
+
+    def _kill_runner(self, pid: int | None) -> bool:
+        """Signal the runner's process group, then insist.
+
+        The group, not the process: ask() starts the runner with
+        start_new_session, so it leads a group containing whatever it
+        spawned. Signalling only the runner would orphan its children.
+        """
+        if not pid or not pid_alive(pid):
+            return False
+        try:
+            group = os.getpgid(pid)
+        except ProcessLookupError:
+            return False
+
+        for sig in (signal.SIGTERM, signal.SIGKILL):
+            if not self._signal(pid, group, sig):
+                return not pid_alive(pid)
+            # A moment to exit cleanly before insisting.
+            for _ in range(20):
+                self._reap(pid)
+                if not pid_alive(pid):
+                    return True
+                time.sleep(0.05)
+        return not pid_alive(pid)
+
+    @staticmethod
+    def _signal(pid: int, group: int, sig: int) -> bool:
+        """Signal the group, or failing that the process. True if delivered.
+
+        The group first, because the runner leads one containing whatever
+        it spawned and signalling only the runner would orphan its
+        children. But group signalling is not uniformly permitted across
+        platforms even for one's own child, so a refusal there falls back
+        to the process itself rather than giving up -- a stopped job that
+        keeps running is the worst outcome available.
+        """
+        for target, deliver in ((group, os.killpg), (pid, os.kill)):
+            try:
+                deliver(target, sig)
+                return True
+            except ProcessLookupError:
+                return False  # already gone
+            except PermissionError:
+                continue
+        log.warning("not permitted to stop pid %s", pid)
+        return False
+
+    @staticmethod
+    def _reap(pid: int) -> None:
+        """Collect the runner if it was our child and has exited.
+
+        Nothing waits on the runner otherwise, so it would linger as a
+        zombie and keep answering "yes" to being alive.
+        """
+        try:
+            os.waitpid(pid, os.WNOHANG)
+        except (ChildProcessError, OSError):
+            pass
 
     # -- listings -----------------------------------------------------------
 

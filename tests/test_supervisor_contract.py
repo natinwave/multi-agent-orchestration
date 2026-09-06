@@ -202,6 +202,7 @@ PUBLIC = [
     "list_repos",
     "reap",
     "list_credentials",
+    "stop",
     "grant",
     "revoke",
     "list_grants",
@@ -494,3 +495,124 @@ def test_the_voice_credentials_are_in_the_scrub_env_list() -> None:
     scrub = load_shipped().scrub_env
     assert "OPENAI_API_KEY" in scrub
     assert "DISCORD_BOT_TOKEN" in scrub
+
+
+# --- stopping a job ---------------------------------------------------------
+
+
+class _SlowHandler(_Handler):
+    """A model server that takes its time, so a job can be caught running."""
+
+    def do_POST(self) -> None:  # noqa: N802
+        time.sleep(30)
+        super().do_POST()
+
+
+@pytest.fixture
+def slow_model():
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _SlowHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    yield f"http://127.0.0.1:{server.server_port}/v1"
+    server.shutdown()
+    server.server_close()
+
+
+@pytest.fixture
+def sup_slow(tmp_path: Path, slow_model: str) -> Supervisor:
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "agents.toml").write_text(
+        f'[agents.hermes]\ntype = "http_openai"\nbase_url = "{slow_model}"\n'
+        f'model = "hermes"\nneeds_repo = false\ntimeout_seconds = 60\n'
+    )
+    (cfg / "repos.toml").write_text('[repos.main]\nurl = "https://h/o/m.git"\n')
+    (cfg / "orchestrator.toml").write_text(
+        f'[paths]\nroot = "{tmp_path / "srv"}"\n'
+        f'[credentials]\nsecrets_root = "{tmp_path / "secrets"}"\n'
+    )
+    return Supervisor.create(config=load(cfg, tmp_path / "srv"), environ={})
+
+
+def wait_until_running(sup: Supervisor, job_id: str, timeout: float = 10.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if sup.check(job_id)["state"] == "running":
+            return
+        time.sleep(0.05)
+    raise AssertionError(f"{job_id} never started running")
+
+
+def test_a_running_job_can_be_stopped(sup_slow: Supervisor) -> None:
+    job_id = sup_slow.ask("hermes", "something slow")["job_id"]
+    wait_until_running(sup_slow, job_id)
+
+    result = sup_slow.stop(job_id)
+    assert result["state"] == "stopped"
+    assert result["runner_stopped"] is True
+    assert sup_slow.check(job_id)["state"] == "stopped"
+
+
+def test_the_runner_process_is_actually_gone(sup_slow: Supervisor) -> None:
+    """Reporting a job stopped while it keeps working would be the worst
+    of both: you believe it ended and it is still editing files."""
+    from orchestrator.state import JobPaths, Status, pid_alive
+
+    job_id = sup_slow.ask("hermes", "something slow")["job_id"]
+    wait_until_running(sup_slow, job_id)
+    pid = Status.read(JobPaths(sup_slow.config.jobs_dir / job_id)).runner_pid
+
+    sup_slow.stop(job_id)
+    deadline = time.monotonic() + 5
+    while time.monotonic() < deadline and pid_alive(pid):
+        time.sleep(0.05)
+    assert not pid_alive(pid), "the runner survived being stopped"
+
+
+def test_stopping_says_so_in_the_narration(sup_slow: Supervisor) -> None:
+    """So a later check() explains why it ended, not just that it did."""
+    job_id = sup_slow.ask("hermes", "something slow")["job_id"]
+    wait_until_running(sup_slow, job_id)
+    sup_slow.stop(job_id)
+    assert any("stopped" in line for line in sup_slow.check(job_id)["narration"])
+
+
+def test_a_stopped_job_is_not_reported_as_failed(sup_slow: Supervisor) -> None:
+    """It did what was asked. Calling that a failure would teach the user
+    to discount the word."""
+    job_id = sup_slow.ask("hermes", "something slow")["job_id"]
+    wait_until_running(sup_slow, job_id)
+    sup_slow.stop(job_id)
+    assert sup_slow.check(job_id)["state"] != "failed"
+
+
+def test_stopping_a_finished_job_is_refused(sup: Supervisor) -> None:
+    job_id = sup.ask("hermes", "do the thing")["job_id"]
+    wait_for_terminal(sup, job_id)
+    assert sup.stop(job_id)["error"] == "already_finished"
+
+
+def test_stopping_an_unknown_job(sup: Supervisor) -> None:
+    assert sup.stop("nosuchjob")["error"] == "unknown_job"
+
+
+def test_stopping_releases_credentials_lent_to_that_job(
+    sup_with_vault: Supervisor,
+) -> None:
+    """A credential lent for work that is no longer happening should not
+    outlive it."""
+    job_id = sup_with_vault.ask("hermes", "do the thing")["job_id"]
+    sup_with_vault.grant("hermes", "staging", job_id=job_id)
+    assert sup_with_vault.list_grants()["grants"]
+
+    result = sup_with_vault.stop(job_id)
+    if "error" in result:  # already finished; the runner releases them too
+        wait_for_terminal(sup_with_vault, job_id)
+    assert sup_with_vault.list_grants()["grants"] == []
+
+
+def test_a_stopped_job_can_then_be_reaped(sup_slow: Supervisor) -> None:
+    job_id = sup_slow.ask("hermes", "something slow")["job_id"]
+    wait_until_running(sup_slow, job_id)
+    sup_slow.stop(job_id)
+    assert sup_slow.reap(job_id)["reaped"] is True

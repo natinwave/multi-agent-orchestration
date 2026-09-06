@@ -128,6 +128,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_revoke.add_argument("agent")
     p_revoke.add_argument("credential", nargs="+")
 
+    p_stop = sub.add_parser("stop", help="stop a running job now")
+    p_stop.add_argument("job_id")
+
     p_reap = sub.add_parser("reap", help="delete a finished job's workspace")
     p_reap.add_argument("job_id")
     p_reap.add_argument("--delete-branch", action="store_true",
@@ -186,6 +189,18 @@ def main(argv: list[str] | None = None) -> int:
                 _fmt_error(result)
                 if "error" in result
                 else f"revoked {result['revoked']} from {result['agent']}"
+            )
+        case "stop":
+            result = sup.stop(args.job_id)
+            text = (
+                _fmt_error(result)
+                if "error" in result
+                else f"{result['job_id']}  stopped"
+                + (
+                    f", {result['credentials_released']} credential(s) released"
+                    if result["credentials_released"]
+                    else ""
+                )
             )
         case "reap":
             result = sup.reap(args.job_id, keep_branch=not args.delete_branch)

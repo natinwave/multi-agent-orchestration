@@ -47,3 +47,12 @@ class Backend(Protocol):
         blocking here is what keeps the supervisor stateless.
         """
         ...
+
+    def stop(self, *, agent: Agent, meta: Meta) -> None:
+        """Stop this job's work, if the backend can.
+
+        Killing the runner is not enough for a container: `docker exec`
+        leaves the process inside the container running when its client
+        dies, so the backend has to reach in and end it.
+        """
+        return None

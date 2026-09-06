@@ -87,6 +87,19 @@ def build_server(sup: Supervisor) -> MCPServer:
         return sup.reply(job_id=job_id, message=message)
 
     @server.tool()
+    def stop(job_id: str) -> dict:
+        """Stop a running job now.
+
+        Ends the agent's work and hands back any credential lent to that
+        job. Whatever it already wrote to its branch stays -- stopping is
+        not undoing, so say so if the user might expect otherwise.
+
+        The job's state becomes 'stopped', which is distinct from 'failed'
+        on purpose: it did what you asked, it did not go wrong.
+        """
+        return sup.stop(job_id=job_id)
+
+    @server.tool()
     def list_agents() -> dict:
         """The agents ask() will accept, and what each is good for."""
         return sup.list_agents()

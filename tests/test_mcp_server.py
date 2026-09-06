@@ -24,6 +24,7 @@ from orchestrator.mcp_server import build_server  # noqa: E402
 BRIEF_TOOLS = {"ask", "check", "list_agents", "list_jobs"}
 EXTRA_TOOLS = {
     "reply",
+    "stop",
     "list_repos",
     "list_credentials",
     "grant",

@@ -7,6 +7,7 @@ by accident while adding "just one more check".
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -179,6 +180,7 @@ def test_secrets_are_written_with_restrictive_permissions() -> None:
 ROOT_SETUP = (SCRIPTS / "root-setup.sh").read_text()
 
 
+@pytest.mark.skipif(os.geteuid() == 0, reason="the premise is being unprivileged")
 def test_root_setup_refuses_to_run_unprivileged() -> None:
     result = subprocess.run(
         ["bash", str(SCRIPTS / "root-setup.sh")], capture_output=True, text=True

@@ -106,6 +106,11 @@ reader never sees a torn file.
 | `awaiting_input` | asked you a question, parked | agent, via `narrate` |
 | `done` | finished cleanly | exit code 0 |
 | `failed` | crashed, timed out, or the runner vanished | non-zero exit |
+| `stopped` | you asked it to stop | `stop()` |
+
+The brief named six states; `stopped` is a deliberate seventh. Being told a
+job "failed" when you asked it to stop is both wrong and alarming, and
+would teach you to discount the word.
 
 One rule is worth stating: `claude -p` **exits 0 when it stops to ask a
 question**. Trusting the exit code alone would report `done` for a job that
@@ -421,8 +426,16 @@ spawns the server itself:
 ```
 
 Tools: `ask`, `check`, `list_agents`, `list_jobs`, plus `reply` (answer a
-parked job), `list_repos` (the names a repo answers to), and
-`list_credentials` / `grant` / `revoke` / `list_grants` for delegation. A
+parked job), `stop` (end one), `list_repos` (the names a repo answers to),
+and `list_credentials` / `grant` / `revoke` / `list_grants` for delegation.
+
+`stop` ends the runner's process group *and* reaches into the container to
+kill the agent by its session id — a `docker exec` leaves its process
+running when the client dies, so without that second step a stopped job
+would carry on editing files with nobody watching. Credentials lent to the
+job go back at the same time. Stopping is not undoing: what the agent
+already wrote to its branch stays there, and the prompt tells the voice
+agent to say so. A
 front-end that only uses the first four works fine.
 
 ### It tells you when something changes
@@ -532,7 +545,7 @@ about any of it:
 What *is* covered off-host, and is worth running before you push:
 
 ```sh
-.venv/bin/python -m pytest -q          # 536 tests
+.venv/bin/python -m pytest -q          # 548 tests
 ./scripts/check-no-secrets.sh
 docker compose -f docker/docker-compose.yml config     # schema only
 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \

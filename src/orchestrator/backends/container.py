@@ -106,6 +106,26 @@ class ContainerBackend:
         detail = None if proc.returncode == 0 else f"exited {proc.returncode}"
         return Outcome(exit_code=proc.returncode, detail=detail)
 
+    def stop(self, *, agent: Agent, meta: Meta) -> None:
+        """End the agent inside the container.
+
+        Killing the runner on the host is not enough: when a `docker exec`
+        client dies its process keeps running inside the container, so a
+        stopped job would carry on editing files with nobody watching.
+
+        The session id is on the agent's command line, which makes it an
+        exact target -- far better than killing every claude in there,
+        since other jobs for the same agent share the container.
+        """
+        if not agent.container:
+            return
+        subprocess.run(
+            ["docker", "exec", agent.container, "pkill", "-f", meta.session_id],
+            capture_output=True,
+            timeout=30,
+            check=False,
+        )
+
     # Split out from run() so the command can be asserted in tests without
     # a docker daemon anywhere near them.
     def docker_command(

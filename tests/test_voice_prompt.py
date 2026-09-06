@@ -59,7 +59,20 @@ def test_it_forbids_inventing_job_names() -> None:
 
 
 def test_it_stays_short_enough_to_be_worth_sending_every_session() -> None:
-    assert len(INSTRUCTIONS) < 4000, "instructions are billed on every session"
+    """Sent once when a call is accepted, not on every turn, so about a
+    thousand tokens is cheap. The cap is against sprawl, not cost: a prompt
+    nobody can hold in their head is one nobody edits carefully."""
+    assert len(INSTRUCTIONS) < 6000, "the prompt is sprawling"
+
+
+def test_it_tells_the_model_it_can_stop_a_job() -> None:
+    assert "You can stop a job" in INSTRUCTIONS
+
+
+def test_it_says_stopping_is_not_undoing() -> None:
+    """Otherwise "stop it" reads as "undo it", and the work is still on the
+    branch."""
+    assert "Stopping is not undoing" in INSTRUCTIONS
 
 
 def test_extra_context_is_appended_not_merged() -> None:

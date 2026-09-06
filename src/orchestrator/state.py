@@ -35,7 +35,14 @@ __all__ = [
 
 
 class JobState(StrEnum):
-    """The six states ``check()`` may report. Nothing else is ever returned."""
+    """The states ``check()`` may report. Nothing else is ever returned.
+
+    The brief specified six. ``stopped`` is a seventh, added deliberately:
+    without it, asking the voice agent to stop a job and then being told
+    the job "failed" is both wrong and alarming. A deliberate stop and a
+    crash are different events and reporting them the same way would teach
+    you to ignore the word failed.
+    """
 
     QUEUED = "queued"
     RUNNING = "running"
@@ -43,10 +50,11 @@ class JobState(StrEnum):
     AWAITING_INPUT = "awaiting_input"
     DONE = "done"
     FAILED = "failed"
+    STOPPED = "stopped"
 
     @property
     def is_terminal(self) -> bool:
-        return self in (JobState.DONE, JobState.FAILED)
+        return self in (JobState.DONE, JobState.FAILED, JobState.STOPPED)
 
     @property
     def is_parked(self) -> bool:

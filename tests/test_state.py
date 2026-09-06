@@ -28,6 +28,9 @@ def paths(tmp_path: Path) -> JobPaths:
 
 
 def test_states_serialise_as_the_documented_strings() -> None:
+    """The brief named six. `stopped` is a deliberate seventh: telling
+    someone their job "failed" when they asked to stop it is both wrong and
+    alarming, and would teach them to discount the word failed."""
     assert [str(s) for s in JobState] == [
         "queued",
         "running",
@@ -35,7 +38,14 @@ def test_states_serialise_as_the_documented_strings() -> None:
         "awaiting_input",
         "done",
         "failed",
+        "stopped",
     ]
+
+
+def test_a_stopped_job_is_finished_but_not_failed() -> None:
+    assert JobState.STOPPED.is_terminal
+    assert JobState.STOPPED is not JobState.FAILED
+    assert not JobState.STOPPED.is_active
 
 
 def test_state_categories() -> None:

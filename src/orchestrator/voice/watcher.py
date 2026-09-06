@@ -32,6 +32,8 @@ log = logging.getLogger("orchestrator.voice.watcher")
 #: queued to running is progress, not news -- it changes nothing you would
 #: do differently, so it is not worth a sentence.
 NOTIFY_STATES = frozenset({"done", "failed", "awaiting_input", "blocked"})
+# "stopped" is deliberately absent: you only get there by asking, and being
+# told about a thing you just did is noise.
 
 #: How long a job must hold a state before it is announced. Without this a
 #: job that fails instantly is announced before the model has finished
