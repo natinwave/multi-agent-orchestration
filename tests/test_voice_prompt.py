@@ -9,6 +9,10 @@ from __future__ import annotations
 
 from orchestrator.voice.prompt import INSTRUCTIONS, build_instructions
 
+#: The prompt is hard-wrapped, so a phrase can straddle a line break. Tests
+#: assert against this rather than tripping over where the wrap happened.
+FLAT = " ".join(INSTRUCTIONS.split())
+
 
 def test_it_says_output_is_heard_not_read() -> None:
     assert "heard" in INSTRUCTIONS
@@ -93,3 +97,25 @@ def test_extra_context_is_appended_not_merged() -> None:
 def test_no_extra_context_leaves_the_prompt_alone() -> None:
     assert build_instructions(None) == INSTRUCTIONS
     assert build_instructions("   ") == INSTRUCTIONS
+
+
+def test_it_knows_how_to_choose_an_agent() -> None:
+    """ask() requires one and the user will usually not name one, so
+    without this "do XYZ" is underspecified and the model guesses."""
+    assert "Choosing who does the work" in FLAT
+    assert "Pick, do not ask" in FLAT
+
+
+def test_it_says_which_agent_it_picked() -> None:
+    """A silent wrong choice is discovered ten minutes later."""
+    assert "say which you picked" in FLAT
+
+
+def test_it_has_a_tiebreak() -> None:
+    assert "toss-up" in FLAT
+
+
+def test_it_refuses_to_guess_at_an_unregistered_repository() -> None:
+    """Work done in the wrong repository is worse than work not started."""
+    assert "not registered" in FLAT
+    assert "Do not start the job somewhere else" in FLAT

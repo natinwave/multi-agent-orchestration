@@ -1,5 +1,7 @@
 """Running an agent on the host, outside any container.
 
+Every credential here is fabricated. secret-scan: allow
+
 The container exists to bound what an agent can reach, so this backend is
 a deliberate decision to give that up for one agent. Most of these tests
 are about what it refuses to do as a result.

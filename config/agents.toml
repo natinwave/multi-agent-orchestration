@@ -9,7 +9,7 @@
 
 [agents.claude-code]
 type = "container"
-description = "Long-horizon coding work in a container. Writes to a git worktree."
+description = "Coding work: reading, editing and testing code in a repository. Runs sandboxed in a container, so it works autonomously but cannot reach the machine itself. The default choice for anything involving files."
 container = "orch-claude-code"
 # Where this agent's credentials are materialised on the host (tmpfs, 0700)
 # and mounted read-only into its container at /run/secrets. Per-agent, so
@@ -37,7 +37,7 @@ timeout_seconds = 14400
 
 [agents.hermes]
 type = "http_openai"
-description = "Local model on this host. Short-horizon questions, no repo needed."
+description = "A fast local model for questions and lookups that need no repository and no file access. Cheap and immediate; cannot do coding work."
 # STUB. Point this at the real server and re-run bootstrap.sh; nothing else
 # needs to change. The supervisor talks to it from the host, over loopback.
 base_url = "http://127.0.0.1:8080/v1"
@@ -80,7 +80,7 @@ max_tokens = 2048
 #
 # [agents.local]
 # type = "local"
-# description = "Runs on the desktop itself. Full access, no container."
+# description = "Runs on the desktop itself rather than in a container. For work that needs the machine: starting services, reaching files outside a repository, using tools installed on the host. Less sandboxed, so it asks permission for anything beyond editing."
 # secrets_dir = "/run/orchestration/secrets/claude-code"
 # default_repo = "main"
 # needs_repo = true

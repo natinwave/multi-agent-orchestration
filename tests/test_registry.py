@@ -321,3 +321,10 @@ def test_an_agent_without_resume_flags_reports_no_sessions(tmp_path: Path) -> No
     cfg = load(write_config(tmp_path, agents=agents))
     assert cfg.agents["oneshot"].can_resume is False
     assert cfg.agents["claude-code"].can_resume if "claude-code" in cfg.agents else True
+
+
+def test_agent_descriptions_distinguish_them() -> None:
+    """These are what the voice model reads when deciding who gets a job,
+    so they have to say what each is FOR, not merely what it is."""
+    for agent in load().agents.values():
+        assert len(agent.description) > 60, f"{agent.name}: too thin to choose on"
