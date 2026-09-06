@@ -189,6 +189,31 @@ secrets_step() {
   # already-exported token meant every *other* reference was silently
   # never resolved; and `op run` fails wholesale on one bad reference, so
   # a missing optional item took the rest down with it.
+  # op://<vault>/<item>/<field> -- print what fields that item really has.
+  describe_item() {
+    local ref="$1" vault item fields
+    vault="$(printf '%s' "$ref" | cut -d/ -f3)"
+    item="$(printf '%s' "$ref" | cut -d/ -f4)"
+    [ -n "$vault" ] && [ -n "$item" ] || return 0
+
+    fields="$(op item get "$item" --vault "$vault" --format json 2>/dev/null \
+      | python3 -c '
+import json, sys
+try:
+    item = json.load(sys.stdin)
+except Exception:
+    raise SystemExit(0)
+labels = [f.get("label") or f.get("id") for f in item.get("fields", [])]
+print(", ".join(l for l in labels if l))
+' 2>/dev/null)"
+
+    if [ -n "$fields" ]; then
+      info "  \"${item}\" has fields: ${fields}"
+    else
+      info "  no item called \"${item}\" in vault \"${vault}\""
+    fi
+  }
+
   resolve_from_vault() {
     have op || return 0
     [ -r "${HERE}/.env" ] || return 0
@@ -212,6 +237,11 @@ secrets_step() {
         export "${var}=${value}"
       else
         unresolved="${unresolved}${var} "
+        # Naming the field labels the item actually has turns "that
+        # reference is wrong" into a copy-and-paste fix. Guessing at field
+        # names is the commonest way an op:// reference goes wrong, and the
+        # error from op alone does not say what was available.
+        describe_item "$ref"
       fi
       unset value
     done

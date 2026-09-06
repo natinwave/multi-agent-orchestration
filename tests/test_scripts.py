@@ -296,3 +296,22 @@ def test_the_installer_warns_about_lingering() -> None:
     works until you log out, then does not."""
     installer = (SCRIPTS / "install-voice-service.sh").read_text()
     assert "enable-linger" in installer
+
+
+def test_bootstrap_names_the_fields_an_item_actually_has() -> None:
+    """Guessing at field names is the commonest way an op:// reference goes
+    wrong, and op's own error does not say what was available. Naming them
+    turns "that reference is wrong" into a copy-and-paste fix."""
+    assert "describe_item" in BOOTSTRAP
+    assert "has fields:" in BOOTSTRAP
+    assert "no item called" in BOOTSTRAP
+
+
+def test_env_example_references_resolve_to_one_vault() -> None:
+    """A reference to a vault that is not there kills bootstrap before it
+    starts, which cost a round trip once already."""
+    import re
+
+    text = (ROOT / ".env.example").read_text()
+    vaults = {m.group(1) for m in re.finditer(r"op://([^/]+)/", text)}
+    assert vaults == {"Agent"}, f"unexpected vaults: {sorted(vaults)}"
