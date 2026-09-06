@@ -192,3 +192,18 @@ def test_verbose_raises_our_logging_not_everything() -> None:
     assert "level=logging.DEBUG" not in source, "root logger must not go to DEBUG"
     for noisy in ("websockets", "asyncio"):
         assert noisy in source, f"{noisy} should be pinned down explicitly"
+
+
+def test_the_default_transport_is_one_that_works() -> None:
+    """Discord was first and is deaf upstream (Pycord 3139). Leaving it as
+    the default meant the no-flag path was the one that does not work."""
+    from orchestrator.voice.__main__ import main
+    import argparse
+    import contextlib
+    import io
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf), contextlib.suppress(SystemExit):
+        main(["--help"])
+    help_text = buf.getvalue()
+    assert "sip for a real phone call (default)" in help_text

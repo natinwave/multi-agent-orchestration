@@ -189,9 +189,12 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="orchestrator.voice", description=__doc__)
     parser.add_argument(
         "--transport",
-        default="discord",
-        help="sip for a real phone call, discord (currently deaf: Pycord 3139), "
-        "or loopback for a smoke test with no audio",
+        default="sip",
+        # Discord was the first transport and is deaf upstream (Pycord
+        # 3139), so defaulting to it meant the no-flag path was the one
+        # that does not work.
+        help="sip for a real phone call (default), loopback for a smoke test "
+        "with no audio, or discord -- which cannot hear you, see README",
     )
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args(argv)

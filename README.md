@@ -3,19 +3,27 @@
 
 # multi-agent-orchestration
 
-A host-side supervisor that hands work to background coding agents and
-reports back in a few short sentences.
+Call a phone number, tell it what you want done, and hang up. Agents run
+on a desktop you are not sitting at; you get a sentence back when
+something finishes, needs an answer, or goes wrong.
 
-Two operations, meant for a voice front-end that does not exist yet:
+Underneath it is two operations:
 
 ```
 ask(agent, message)  -> job_id        # "kestrel"
 check(job_id)        -> {state, narration[]}
 ```
 
-Phase one is the orchestration core. There is no audio here, on purpose:
-`ask`/`check` have to be demonstrably right over text before anything reads
-them out loud.
+Everything else — the phone call, the profiles, the credential handling —
+is those two with the sharp edges filed off. `check()` returns a state and
+three short lines, because that reply becomes a voice model's context and
+is then read out loud.
+
+**Working today:** a real phone number answered over SIP, coding agents in
+containers, an agent on the bare host, a local model, remote agents on AWS,
+credential delegation from 1Password, and unprompted updates while you
+talk. Discord voice was the first transport and is broken upstream — see
+[the voice layer](#the-voice-layer).
 
 ---
 
@@ -320,6 +328,86 @@ run by bootstrap, which is also what puts them back after a reboot since
 `list_agents()` reports the titles, so the voice agent can answer "what
 does Ledger have?" without a second call and without ever seeing a value.
 
+### Making a profile
+
+Say you want an agent called **ledger** that only ever works on the
+provisioning ledger, holds that database's password, and can run two jobs
+at once without them colliding.
+
+**1. Register the repository** it works on, in `config/repos.toml`:
+
+```toml
+[repos.ledger]
+url = "https://github.com/you/provision-ledger.git"
+base_ref = "develop"                       # worktrees are cut from this
+aliases = ["the ledger", "provisioning"]   # how you say it out loud
+```
+
+**2. Write the profile** at `/srv/orchestration/profiles/ledger.toml` —
+outside the repository, because this is yours. Copy
+`examples/profiles/ledger.toml` and edit:
+
+```toml
+description = """
+Works on the provisioning ledger: its schema, importers and tests. Knows
+that codebase and nothing else. Give it a ledger task and leave it.
+"""
+
+extends     = "claude-code"      # command, flags, timeouts, narration
+image       = "orchestration/ledger:latest"
+isolation   = "per_job"          # a container of its own per instance
+secrets_dir = "/run/orchestration/secrets/ledger"
+credentials = ["Ledger DB Password"]
+default_repo = "ledger"
+needs_repo  = true
+max_concurrent = 2
+```
+
+The `description` is not decoration — it is what the voice model reads
+when deciding who gets a job, so say what the agent is *for*.
+
+**3. Build its image.** Start from the base so the toolchain, browser,
+narration helper and agent prompt are already there, and a job costs a
+container start rather than an install:
+
+```dockerfile
+FROM orchestration/claude-code:latest
+USER root
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        postgresql-client && rm -rf /var/lib/apt/lists/*
+USER agent
+```
+
+```sh
+docker build -f /srv/orchestration/profiles/ledger.Dockerfile \
+             -t orchestration/ledger:latest /srv/orchestration/profiles
+```
+
+**4. Give it its credentials.** Add `Ledger DB Password` to the `Agent`
+vault, then:
+
+```sh
+./bin/orchestrate sync-credentials
+./bin/orchestrate list-agents        # ledger, and what it holds
+```
+
+**5. Use it.** By name, from the CLI or out loud:
+
+```sh
+./bin/orchestrate ask ledger "the nightly importer is dropping rows"
+```
+
+> "have ledger look at the nightly importer, and start a second one on the
+> schema migration"
+
+Two instances, two containers, two worktrees, neither aware of the other.
+
+**Changing a profile** is editing the file. The registry is read fresh on
+every command, so a new profile is available immediately; only an image
+change needs a rebuild, and only new `credentials` need
+`sync-credentials`. After a reboot run `bootstrap.sh`, which re-syncs them
+— `/run` is a tmpfs and is emptied.
+
 Three mechanics underneath:
 
 **`extends`** — a second kind is a few lines, not a copy:
@@ -456,8 +544,9 @@ sudo ./scripts/root-setup.sh            # once per machine, the only root step
 
 ./scripts/bootstrap.sh --selftest       # finds ~/.op-token by itself
 
-./bin/orchestrate ask claude-code "fix the failing parser test"
-# kestrel  started on claude-code in main (job/kestrel)
+./bin/orchestrate list-agents
+./bin/orchestrate ask claude-code "fix the failing parser test" --repo ledger
+# kestrel  started on claude-code in ledger (job/kestrel)
 
 ./bin/orchestrate check kestrel
 # kestrel  RUNNING
@@ -466,7 +555,31 @@ sudo ./scripts/root-setup.sh            # once per machine, the only root step
 
 ./bin/orchestrate check kestrel --tail 40     # scrubbed raw log, opt-in
 ./bin/orchestrate list-jobs --active
+./bin/orchestrate stop kestrel
 ```
+
+`--repo` is not optional in spirit: no agent defaults to one, so a job
+without it gets an empty directory. Register yours in `config/repos.toml`
+first.
+
+Then [make a profile](#making-a-profile) for the work you do repeatedly,
+and [answer the phone](#the-voice-layer).
+
+### The command surface
+
+| | |
+|---|---|
+| `ask <agent> <message> [--repo]` | start a job, get a name back |
+| `check <job> [--tail N]` | state and the last few narration lines |
+| `reply <job> <message>` | answer a job parked on `awaiting_input` |
+| `stop <job>` · `reap <job>` | end one · delete a finished one's workspace |
+| `list-jobs [--active]` · `list-agents` · `list-repos` | what exists |
+| `list-credentials` · `list-grants` | the vault's titles · what is lent out |
+| `grant <agent> <credential> [--job]` · `revoke` | lend one · take it back |
+| `sync-credentials` | give every profile the credentials it declares |
+
+Every one of these is also an MCP tool except `reap` and
+`sync-credentials`, which are housekeeping rather than conversation.
 
 `preflight.sh` is the first thing to run and its whole output is meant to
 be pasted into chat: one line per check, one summary line.
@@ -591,24 +704,39 @@ scratch directory if it has none.
 
 ## Adding an agent
 
+Four kinds of agent, chosen by `type`:
+
+| `type` | runs | for |
+|---|---|---|
+| `container` | in Docker, on this host | coding work. Sandboxed, so it can be trusted with `--dangerously-skip-permissions` and left alone |
+| `local` | on the bare host | work that needs the machine — services, files outside a worktree. No sandbox, so it gets `acceptEdits` and an explicit tool list instead |
+| `http_openai` | wherever your model server is | questions. One request, one answer: no worktree, no tools, no file access |
+| `bedrock_agentcore` | on AWS | agents that already exist elsewhere and know things this machine does not |
+
 Config, not code. `config/agents.toml`:
 
 ```toml
 [agents.reviewer]
-type = "container"
-container = "orch-reviewer"
-command = ["claude", "-p", "--dangerously-skip-permissions",
-           "--output-format", "stream-json", "--verbose"]
-secrets_dir = "/run/orchestration/secrets/reviewer"
-default_repo = "main"
-needs_repo = true
+extends = "claude-code"
+description = "Reads a change and reports on it. Never edits: give it a branch and ask what is wrong."
+isolation = "per_job"
+image = "orchestration/claude-code:latest"
+max_concurrent = 2
 ```
 
-Add a matching service to `docker-compose.yml` — copy the `claude-code`
-one, change the container name and the secrets mount — and re-run
-bootstrap. Unknown keys are rejected at load time rather than ignored,
-because a silently-dropped `timeout_second` typo means an agent running
-with the wrong timeout for weeks.
+Anything named here wins; everything else — command, flags, timeouts,
+secrets, the narration contract — comes from the parent. A `container`
+agent using the default `isolation = "shared"` also needs a matching
+service in `docker-compose.yml`; one using `per_job` needs only an image,
+which is usually the simpler answer.
+
+Unknown keys are rejected at load time rather than ignored, because a
+silently-dropped `timeout_second` typo means an agent running with the
+wrong timeout for weeks.
+
+For anything you will use repeatedly, prefer a
+[profile](#making-a-profile): same mechanism, but the file lives outside
+this repository where personal configuration belongs.
 
 **A different CLI is also config.** Each agent declares how its tool spells
 "start a session", "resume one" and "take a system prompt":
@@ -690,7 +818,7 @@ about any of it:
 What *is* covered off-host, and is worth running before you push:
 
 ```sh
-.venv/bin/python -m pytest -q          # 632 tests
+.venv/bin/python -m pytest -q          # 641 tests
 ./scripts/check-no-secrets.sh
 docker compose -f docker/docker-compose.yml config     # schema only
 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \
@@ -729,13 +857,19 @@ Four things, and the first one is the one that bites:
 3. **`gh auth login`**, if you want agents opening pull requests.
 4. **The hermes endpoint.** `base_url` in `config/agents.toml` is a
    placeholder port. Point it at the real server; nothing else changes.
+5. **For the phone**: a SIP trunk pointed at
+   `sip:$PROJECT_ID@sip.api.openai.com;transport=tls`, a tunnel so OpenAI
+   can reach the webhook, and your own number in `allowed_callers`. See
+   [SIP](#sip-a-real-phone-number).
+6. **For agents on AWS**: an IAM user scoped to the harnesses you want
+   invoked, and `pip install -e '.[aws]'`.
 
 ## Known limits
 
-- Jobs belonging to the same agent share a container, so one job can read
-  another's worktree. That boundary is the *agent identity*, not the job.
-  Separate identities need separate containers and separate secret
-  directories.
+- With the default `isolation = "shared"`, jobs of the same agent share a
+  container and can read each other's worktrees. Set
+  `isolation = "per_job"` — which profiles do by default — and each
+  instance gets a container of its own.
 - Container egress is unrestricted, because Claude Code needs the API. So
   `--dangerously-skip-permissions` is bounded by the container, not by the
   network. An egress-limited network is future work.
