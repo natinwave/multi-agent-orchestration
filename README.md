@@ -487,7 +487,7 @@ about any of it:
 What *is* covered off-host, and is worth running before you push:
 
 ```sh
-.venv/bin/python -m pytest -q          # 487 tests
+.venv/bin/python -m pytest -q          # 492 tests
 ./scripts/check-no-secrets.sh
 docker compose -f docker/docker-compose.yml config     # schema only
 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \
@@ -575,8 +575,27 @@ surface. `audio.py` and `playback.py` exist solely to feed Discord. What
 runs here is the door and the tool calls.
 
 ```sh
-./bin/orchestrate-voice --transport sip
+./scripts/install-voice-service.sh     # run it as a service (recommended)
+./bin/orchestrate-voice --transport sip   # or in the foreground, to watch it
 ```
+
+**Run it as a service.** The listener waits for the phone to ring and never
+exits, so anything running it in the foreground is holding a process
+forever — and an agent relaying commands over chat cannot: its tool call
+times out, the process dies with it, and the symptom is a phone that rings
+while the webhook returns 502 from a tunnel whose target has gone. As a
+service it survives that, restarts on failure, and logs to journald where
+it can be read without holding anything:
+
+```sh
+journalctl --user -u orchestrator-voice -f
+```
+
+It restarts indefinitely on purpose. `/run` is a tmpfs, so after a reboot
+the credentials are gone until `bootstrap.sh` refills them; the listener
+backs off and retries rather than giving up, and the phone starts working
+again on its own. Enable lingering (`sudo loginctl enable-linger $USER`) or
+the service stops when your session ends.
 
 **Only numbers you list are answered.** Three layers, because caller ID
 alone is not a strong boundary — a SIP `From` header can be forged, and

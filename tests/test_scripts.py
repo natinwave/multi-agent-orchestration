@@ -227,3 +227,45 @@ def test_preflight_still_changes_nothing_when_resolving() -> None:
     writing a file, preflight's read-only promise is broken."""
     for bad in ("op run", "op inject", "op item create", "op vault create"):
         assert bad not in PREFLIGHT
+
+
+# --- the long-running service ----------------------------------------------
+
+SERVICE_TEMPLATE = (
+    ROOT / "systemd" / "orchestrator-voice.service.template"
+).read_text()
+
+
+def test_the_service_installer_is_valid_and_executable() -> None:
+    path = SCRIPTS / "install-voice-service.sh"
+    assert subprocess.run(["bash", "-n", str(path)]).returncode == 0
+    assert path.stat().st_mode & 0o111
+
+
+def test_the_service_restarts_forever() -> None:
+    """Credentials live on a tmpfs wiped every boot, so after a restart the
+    listener fails until bootstrap refills them. Giving up after the usual
+    burst limit would leave the phone quietly dead."""
+    assert "Restart=always" in SERVICE_TEMPLATE
+    assert "StartLimitIntervalSec=0" in SERVICE_TEMPLATE
+
+
+def test_the_service_runs_as_a_user_not_root() -> None:
+    """Nothing here needs root, and the secrets belong to the user."""
+    assert "WantedBy=default.target" in SERVICE_TEMPLATE
+    assert "User=root" not in SERVICE_TEMPLATE
+    assert "NoNewPrivileges=true" in SERVICE_TEMPLATE
+
+
+def test_the_service_logs_somewhere_readable_without_holding_it() -> None:
+    """The reason this is a service at all: an agent relaying commands
+    cannot hold a foreground process, but it can read a journal."""
+    assert "StandardOutput=journal" in SERVICE_TEMPLATE
+    assert "journalctl" in SERVICE_TEMPLATE
+
+
+def test_the_installer_warns_about_lingering() -> None:
+    """Without it the service stops when the session ends -- so the phone
+    works until you log out, then does not."""
+    installer = (SCRIPTS / "install-voice-service.sh").read_text()
+    assert "enable-linger" in installer

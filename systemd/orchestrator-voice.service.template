@@ -1,0 +1,67 @@
+# The SIP listener, as a service.
+#
+# It has to be one. The listener never exits by design -- it waits for the
+# phone to ring -- and anything that runs it in the foreground is holding a
+# process forever. An agent relaying commands over chat cannot do that: its
+# tool call times out, the process is killed with it, and the symptom is a
+# phone that rings and rings while the webhook returns 502 from a tunnel
+# whose target is gone.
+#
+# A user service, not a system one: nothing here needs root, and the
+# secrets it reads belong to your user.
+#
+# Install (replacing the placeholder with your checkout):
+#
+#   mkdir -p ~/.config/systemd/user
+#   sed "s|%REPO%|$PWD|g" systemd/orchestrator-voice.service.template \
+#     > ~/.config/systemd/user/orchestrator-voice.service
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now orchestrator-voice
+#
+# Then, so it keeps running when you are not logged in:
+#
+#   sudo loginctl enable-linger "$USER"
+#
+# Watch it:  journalctl --user -u orchestrator-voice -f
+# Restart:   systemctl --user restart orchestrator-voice
+# Stop:      systemctl --user stop orchestrator-voice
+
+[Unit]
+Description=Orchestrator voice bridge (SIP)
+Documentation=https://github.com/natinwave/multi-agent-orchestration
+# Only ordering, not a hard dependency: the listener retries by itself, and
+# refusing to start without the network would be worse than backing off.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%REPO%
+ExecStart=%REPO%/bin/orchestrate-voice --transport sip
+
+# Credentials live on a tmpfs that is wiped every boot and refilled by
+# bootstrap.sh, so after a restart this will fail until that has run. That
+# is why it retries rather than giving up: once the secrets are back, the
+# next attempt succeeds and the phone works again with nobody intervening.
+Restart=always
+RestartSec=15
+# Do not give up after the usual burst limit. A phone line that stops
+# retrying after five failures is a phone line that is quietly dead.
+StartLimitIntervalSec=0
+
+# Journald gets the log; the listener writes plain lines with timestamps.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=orchestrator-voice
+
+# It reads secrets and talks to the network. It has no business writing
+# anywhere but its own runtime directories.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectControlGroups=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=default.target
