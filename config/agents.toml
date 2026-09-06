@@ -15,8 +15,11 @@ container = "orch-claude-code"
 # and mounted read-only into its container at /run/secrets. Per-agent, so
 # claude-code cannot read hermes's identity or vice versa.
 secrets_dir = "/run/orchestration/secrets/claude-code"
-default_repo = "main"
-needs_repo = true
+# No default repository on purpose. An unnamed job gets a scratch
+# directory, not somebody's codebase: defaulting to one meant a vague
+# request quietly started editing whichever repo happened to be first in
+# the file. Name the repo when you want one.
+needs_repo = false
 # --dangerously-skip-permissions is acceptable here and ONLY here: the blast
 # radius is the container. Nothing run on the bare host uses it.
 command = [
@@ -82,8 +85,7 @@ max_tokens = 2048
 # type = "local"
 # description = "Runs on the desktop itself rather than in a container. For work that needs the machine: starting services, reaching files outside a repository, using tools installed on the host. Less sandboxed, so it asks permission for anything beyond editing."
 # secrets_dir = "/run/orchestration/secrets/claude-code"
-# default_repo = "main"
-# needs_repo = true
+# needs_repo = false
 # command = [
 #   "claude", "-p",
 #   "--permission-mode", "acceptEdits",
@@ -95,3 +97,29 @@ max_tokens = 2048
 # resume_flags = ["--resume", "{session_id}"]
 # system_prompt_flags = ["--append-system-prompt-file", "{agent_prompt}"]
 # timeout_seconds = 14400
+
+# Agents running on AWS Bedrock AgentCore. Nothing is checked out and
+# nothing runs here: a message goes out and an answer comes back. The
+# job's own session id is reused as the runtime session, so replying
+# continues the same conversation rather than starting a new one.
+#
+# The ARNs are identifiers, not secrets. The credentials to invoke them
+# are in 1Password; see .env.example.
+
+[agents.soren]
+type = "bedrock_agentcore"
+description = "A PharmacyChecker agent on AWS. Knows that product and its data; cannot touch this machine or any repository here."
+harness_arn = "arn:aws:bedrock-agentcore:us-east-1:824683096545:harness/Soren-RSXzGGYQaQ"
+region = "us-east-1"
+secrets_dir = "/run/orchestration/secrets/agentcore"
+needs_repo = false
+timeout_seconds = 600
+
+[agents.vesper]
+type = "bedrock_agentcore"
+description = "A second PharmacyChecker agent on AWS, alongside Soren. Same reach: that product's world, not this machine."
+harness_arn = "arn:aws:bedrock-agentcore:us-east-1:824683096545:harness/Vesper-CVQBrrztvd"
+region = "us-east-1"
+secrets_dir = "/run/orchestration/secrets/agentcore"
+needs_repo = false
+timeout_seconds = 600

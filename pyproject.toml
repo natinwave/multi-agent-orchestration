@@ -19,6 +19,8 @@ mcp = ["mcp>=2.0,<3"]
 # protocol. Without them py-cord imports fine and then refuses to join a
 # voice channel, which is the whole point.
 voice = ["mcp>=2.0,<3", "websockets>=12", "py-cord[voice]>=2.6"]
+# Agents running on AWS Bedrock AgentCore.
+aws = ["boto3>=1.34"]
 dev = ["pytest>=8.0"]
 
 [project.scripts]

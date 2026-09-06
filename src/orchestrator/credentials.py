@@ -50,7 +50,7 @@ __all__ = [
 # A grant may not overwrite these: doing so would replace the agent's own
 # Claude credential with something else.
 RESERVED = frozenset(
-    {"oauth_token", "anthropic_api_key", "github_token", "openai_api_key", "discord_bot_token", "openai_webhook_secret"}
+    {"oauth_token", "anthropic_api_key", "github_token", "openai_api_key", "discord_bot_token", "openai_webhook_secret", "aws_access_key_id", "aws_secret_access_key"}
 )
 
 # A granted file becomes an environment variable, so its name has to be a

@@ -55,7 +55,7 @@ def test_it_explains_what_redacted_means() -> None:
 
 
 def test_it_handles_ambiguous_repositories_by_asking() -> None:
-    assert "Do not pick." in INSTRUCTIONS
+    assert "matches more than one, read out the choices and ask" in FLAT
 
 
 def test_it_prioritises_a_job_waiting_for_input() -> None:
@@ -67,7 +67,7 @@ def test_it_expects_to_be_interrupted() -> None:
 
 
 def test_it_forbids_inventing_job_names() -> None:
-    assert "Never invent one" in INSTRUCTIONS
+    assert "never invent one" in FLAT
 
 
 def test_it_stays_short_enough_to_be_worth_sending_every_session() -> None:
@@ -117,5 +117,13 @@ def test_it_has_a_tiebreak() -> None:
 
 def test_it_refuses_to_guess_at_an_unregistered_repository() -> None:
     """Work done in the wrong repository is worse than work not started."""
-    assert "not registered" in FLAT
-    assert "Do not start the job somewhere else" in FLAT
+    assert "matches none" in FLAT
+    assert "Never start the job somewhere else" in FLAT
+
+
+def test_it_asks_which_repo_rather_than_guessing() -> None:
+    """With no default repository, a coding job with none named gets an
+    empty directory and achieves nothing. Asking is a clarification, not a
+    request for permission."""
+    assert "There is no default repository" in FLAT
+    assert "which repo?" in FLAT

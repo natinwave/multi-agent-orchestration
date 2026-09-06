@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ..registry import Agent
 from .base import Backend, BackendError, Outcome
+from .bedrock_agentcore import BedrockAgentCoreBackend
 from .container import ContainerBackend
 from .http_openai import HttpOpenAIBackend
 from .local import LocalBackend
@@ -16,6 +17,8 @@ BACKENDS = {
     # Runs on the host, outside any boundary. See local.py for what that
     # costs and what it refuses to do as a result.
     "local": LocalBackend,
+    # An agent that already lives somewhere else, on AWS.
+    "bedrock_agentcore": BedrockAgentCoreBackend,
 }
 
 

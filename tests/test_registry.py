@@ -328,3 +328,10 @@ def test_agent_descriptions_distinguish_them() -> None:
     so they have to say what each is FOR, not merely what it is."""
     for agent in load().agents.values():
         assert len(agent.description) > 60, f"{agent.name}: too thin to choose on"
+
+
+def test_no_shipped_agent_defaults_to_a_repository() -> None:
+    """Defaulting meant a vague request quietly started editing whichever
+    repo happened to be listed first."""
+    for agent in load().agents.values():
+        assert not agent.default_repo, f"{agent.name} would edit {agent.default_repo} unasked"

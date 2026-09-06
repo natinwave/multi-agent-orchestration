@@ -197,7 +197,7 @@ secrets_step() {
     local var ref value unresolved=""
     for var in CLAUDE_CODE_OAUTH_TOKEN ANTHROPIC_API_KEY GH_TOKEN \
                HERMES_API_KEY OPENAI_API_KEY DISCORD_BOT_TOKEN \
-               OPENAI_WEBHOOK_SECRET; do
+               OPENAI_WEBHOOK_SECRET AWS_ACCESS_KEY_ID AWS_SECRET_ACCESS_KEY; do
       # Anything already in the environment wins: `op run` may have put it
       # there, or a human may be overriding deliberately.
       [ -n "${!var:-}" ] && continue
@@ -256,6 +256,16 @@ secrets_step() {
   if write_secret voice discord_bot_token "${DISCORD_BOT_TOKEN:-}"; then
     written=$((written + 1))
   elif [ -r "${ORCH_SECRETS}/voice/discord_bot_token" ]; then
+    kept=$((kept + 1))
+  fi
+  if write_secret agentcore aws_access_key_id "${AWS_ACCESS_KEY_ID:-}"; then
+    written=$((written + 1))
+  elif [ -r "${ORCH_SECRETS}/agentcore/aws_access_key_id" ]; then
+    kept=$((kept + 1))
+  fi
+  if write_secret agentcore aws_secret_access_key "${AWS_SECRET_ACCESS_KEY:-}"; then
+    written=$((written + 1))
+  elif [ -r "${ORCH_SECRETS}/agentcore/aws_secret_access_key" ]; then
     kept=$((kept + 1))
   fi
   if write_secret voice openai_webhook_secret "${OPENAI_WEBHOOK_SECRET:-}"; then

@@ -96,6 +96,9 @@ class Agent:
     base_url: str | None = None
     model: str | None = None
     api_key_file: str | None = None
+    # bedrock_agentcore backend
+    harness_arn: str | None = None
+    region: str | None = None
     # shared
     secrets_dir: str | None = None
     default_repo: str | None = None
@@ -277,6 +280,8 @@ def load(config_dir: Path | None = None, root_override: Path | None = None) -> C
         elif kind == "http_openai":
             _require(spec, "base_url", where)
             _require(spec, "model", where)
+        elif kind == "bedrock_agentcore":
+            _require(spec, "harness_arn", where)
         else:
             raise ConfigError(f"{where}: unknown type {kind!r}")
         spec = dict(spec)

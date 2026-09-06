@@ -465,6 +465,19 @@ the only thing between a spoken "sure" and a live secret reaching a process
 that runs model-authored commands, so it is written as prompt surface
 rather than as documentation.
 
+### No repository unless you name one
+
+No agent has a `default_repo`. A job with none named gets a scratch
+directory — right for a question, useless for changing code. Defaulting to
+one meant a vague request quietly started editing whichever repo happened
+to be listed first, which is the kind of mistake you discover later and
+from the outside.
+
+So the voice agent asks "which repo?" when the work plainly needs one, and
+refuses to guess at a name it does not recognise. That is a clarification
+rather than a request for permission, and it is the only thing it stops
+for before starting work.
+
 ### Naming a repo out loud
 
 `ask()` takes an optional free-text repo string, resolved against
@@ -530,6 +543,27 @@ explicit `--allowedTools` list, and the backend refuses the dangerous flag
 outright rather than honouring it quietly. `config/agents.toml` has a
 commented example.
 
+**An agent that lives somewhere else** is `type = "bedrock_agentcore"` —
+a remote agent on AWS, given a message and asked for an answer. Nothing is
+checked out and nothing runs here. The job's session id is reused as the
+runtime session, so `reply()` continues the same conversation rather than
+starting a new one. Needs `pip install -e '.[aws]'`.
+
+Its IAM user should be able to do exactly one thing:
+
+```json
+{ "Effect": "Allow",
+  "Action": "bedrock-agentcore:InvokeHarness",
+  "Resource": [
+    "arn:aws:bedrock-agentcore:us-east-1:<account>:harness/Soren-...",
+    "arn:aws:bedrock-agentcore:us-east-1:<account>:harness/Vesper-..."
+  ] }
+```
+
+Both keys go in the vault; half a credential is refused outright, because
+boto3 would otherwise fall back to ambient credentials and silently act as
+somebody else.
+
 **An OpenAI-compatible API needs nothing at all** — `base_url`, `model`,
 done, like `hermes`. But that backend is one request and one answer: no
 worktree, no tools, no file access. It answers questions; it does not do
@@ -559,7 +593,7 @@ about any of it:
 What *is* covered off-host, and is worth running before you push:
 
 ```sh
-.venv/bin/python -m pytest -q          # 574 tests
+.venv/bin/python -m pytest -q          # 594 tests
 ./scripts/check-no-secrets.sh
 docker compose -f docker/docker-compose.yml config     # schema only
 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \
