@@ -25,6 +25,8 @@ credential still needs a spoken confirmation regardless of who is calling.
 
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -40,6 +42,7 @@ __all__ = [
     "SipListener",
     "accept_payload",
     "verify_signature",
+    "signing_key",
     "caller_of",
     "normalise_number",
     "ACCEPT_URL",
@@ -88,11 +91,39 @@ def caller_of(event: dict) -> str:
     return ""
 
 
+def signing_key(secret: str) -> list[bytes]:
+    """The key material to try for a webhook secret.
+
+    Standard Webhooks secrets are base64, prefixed ``whsec_`` for
+    recognisability, and the bytes to sign with are what that decodes to.
+    The raw string is tried as well, because someone pasting a secret from
+    a dashboard may reasonably paste it in another form, and the cost of a
+    second comparison is nothing next to a phone that silently refuses
+    every call.
+    """
+    keys: list[bytes] = []
+    stripped = secret.removeprefix("whsec_")
+    try:
+        decoded = base64.b64decode(stripped, validate=True)
+        if decoded:
+            keys.append(decoded)
+    except (ValueError, binascii.Error):
+        pass
+    # The stripped string as bytes, for a secret that is not base64 at all.
+    # Deliberately NOT the whsec_-prefixed form: no signer uses the prefix
+    # as key material, so accepting it would only widen what counts as
+    # valid without helping anyone paste anything.
+    if stripped.encode() not in keys:
+        keys.append(stripped.encode())
+    return keys
+
+
 def verify_signature(
     body: bytes,
     signature: str | None,
     timestamp: str | None,
     secret: str,
+    webhook_id: str | None = None,
     now: float | None = None,
 ) -> bool:
     """Whether this really came from OpenAI, recently.
@@ -100,6 +131,15 @@ def verify_signature(
     The endpoint has to be publicly reachable for calls to arrive at all,
     so it will be found and poked. Without this, anyone who found the URL
     could make the phone ring by posting a plausible body.
+
+    This is the Standard Webhooks scheme, which OpenAI follows: HMAC-SHA256
+    over ``id.timestamp.body``, base64 encoded, against a base64-decoded
+    secret, presented as a space-delimited list of ``v1,<signature>``.
+
+    Every one of those details matters and none of them is guessable. An
+    earlier version of this function signed ``timestamp.body`` with the raw
+    secret and compared hex -- it rejected every genuine call, and the
+    tests did not catch it because they signed the same wrong way.
     """
     if not (signature and timestamp and secret):
         return False
@@ -111,16 +151,21 @@ def verify_signature(
     if abs(age) > MAX_SIGNATURE_AGE_SECONDS:
         return False
 
-    expected = hmac.new(
-        secret.encode(), f"{timestamp}.".encode() + body, hashlib.sha256
-    ).hexdigest()
+    signed = f"{webhook_id or ''}.{timestamp}.".encode() + body
+    expected = [
+        base64.b64encode(hmac.new(key, signed, hashlib.sha256).digest()).decode()
+        for key in signing_key(secret)
+    ]
 
-    # Any of the signatures offered may match, and comparison is
-    # constant-time so the endpoint does not leak the correct value one
-    # byte at a time.
-    for candidate in re.split(r"[,\s]+", signature.strip()):
-        candidate = candidate.split("=", 1)[-1] if "=" in candidate else candidate
-        if hmac.compare_digest(candidate, expected):
+    # Signatures are space delimited, each "v1,<base64>". Splitting on "="
+    # here -- as an earlier version did -- truncates base64 padding and can
+    # never match.
+    for entry in signature.split():
+        _, _, candidate = entry.partition(",")
+        candidate = candidate or entry
+        # Constant-time, so the endpoint does not leak the correct value
+        # one byte at a time.
+        if any(hmac.compare_digest(candidate, valid) for valid in expected):
             return True
     return False
 
@@ -168,11 +213,12 @@ class CallScreen:
         body: bytes,
         signature: str | None = None,
         timestamp: str | None = None,
+        webhook_id: str | None = None,
         now: float | None = None,
     ) -> CallDecision:
         """Screen one raw webhook request."""
         if self.signing_secret and not verify_signature(
-            body, signature, timestamp, self.signing_secret, now=now
+            body, signature, timestamp, self.signing_secret, webhook_id=webhook_id, now=now
         ):
             # Deliberately says nothing about the call: a forged request
             # should learn nothing from the reply.
@@ -267,6 +313,7 @@ class SipListener:
                     body,
                     self.headers.get("webhook-signature"),
                     self.headers.get("webhook-timestamp"),
+                    self.headers.get("webhook-id"),
                 )
 
                 # Answer FIRST, and finish answering, before doing anything
