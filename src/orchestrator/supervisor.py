@@ -83,6 +83,14 @@ class Supervisor:
         for identity in identities:
             redactor.register_dir(identity)
 
+        # The 1Password service account token is itself a credential, and
+        # it is read from a file rather than the environment -- so without
+        # this it would be the one secret in the system that scrub_env
+        # could not catch.
+        from .credentials import service_account_token
+
+        redactor.register_value("OP_SERVICE_ACCOUNT_TOKEN", service_account_token())
+
         # Anything configured explicitly elsewhere still counts.
         for agent in config.agents.values():
             if agent.secrets_dir:

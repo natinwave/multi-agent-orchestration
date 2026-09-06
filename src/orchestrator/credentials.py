@@ -27,7 +27,7 @@ import json
 import os
 import re
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -42,6 +42,8 @@ __all__ = [
     "UnknownCredential",
     "AmbiguousCredential",
     "OpError",
+    "service_account_token",
+    "token_paths",
 ]
 
 # Written by bootstrap and owned by the agent's identity, not by a grant.
@@ -116,6 +118,48 @@ def slugify(title: str) -> str:
     return slug[:64]
 
 
+#: Where a service account token may be found, in order. The environment
+#: first, so an operator can override; then the same files bootstrap.sh
+#: looks in, so there is one answer to "where does the token live".
+TOKEN_ENV = "OP_SERVICE_ACCOUNT_TOKEN"
+TOKEN_FILE_ENV = "OP_TOKEN_FILE"
+TOKEN_FILENAME = ".op-token"
+
+
+def token_paths(environ: Mapping[str, str] | None = None) -> list[Path]:
+    env = os.environ if environ is None else environ
+    candidates = []
+    if env.get(TOKEN_FILE_ENV):
+        candidates.append(Path(env[TOKEN_FILE_ENV]))
+    if env.get("HOME"):
+        candidates.append(Path(env["HOME"]) / TOKEN_FILENAME)
+    candidates.append(Path(__file__).resolve().parents[2] / TOKEN_FILENAME)
+    return candidates
+
+
+def service_account_token(environ: Mapping[str, str] | None = None) -> str | None:
+    """The 1Password service account token, from the environment or a file.
+
+    This has to look in files, not only the environment. Everything that
+    reads the vault at runtime -- the MCP server, the CLI, and above all
+    the voice bridge running as a systemd service -- starts with a clean
+    environment, and only bootstrap.sh knew where the token lived. The
+    symptom was a voice agent that could ask for approval to share a
+    credential and then report that it could not find the vault at all.
+    """
+    env = os.environ if environ is None else environ
+    if env.get(TOKEN_ENV):
+        return env[TOKEN_ENV]
+    for path in token_paths(env):
+        try:
+            token = path.read_text(encoding="utf-8").strip()
+        except OSError:
+            continue
+        if token:
+            return token
+    return None
+
+
 def _run_op(argv: list[str]) -> str:
     """Invoke the 1Password CLI.
 
@@ -123,16 +167,32 @@ def _run_op(argv: list[str]) -> str:
     could otherwise put a value into an exception message, which would
     travel straight into a log.
     """
+    env = dict(os.environ)
+    token = service_account_token()
+    if token:
+        env[TOKEN_ENV] = token
+
     try:
         proc = subprocess.run(
-            ["op", *argv], capture_output=True, text=True, timeout=30, check=False
+            ["op", *argv], capture_output=True, text=True, timeout=30, check=False, env=env
         )
     except FileNotFoundError:
         raise OpError("the 1Password CLI (op) is not installed on this host") from None
     except subprocess.TimeoutExpired:
         raise OpError("the 1Password CLI timed out") from None
+
     if proc.returncode != 0:
-        raise OpError(f"op {argv[0]} failed: {proc.stderr.strip()[:200]}")
+        detail = proc.stderr.strip()[:200]
+        # "not signed in" from a background service almost always means the
+        # token was never found, and saying so beats repeating op's advice
+        # to run a command interactively.
+        if not token and re.search(r"(?i)sign|account|authenticat", detail):
+            searched = ", ".join(str(p) for p in token_paths())
+            raise OpError(
+                f"1Password is not authenticated and no service account token was "
+                f"found (looked in {TOKEN_ENV}, then {searched}). op said: {detail}"
+            )
+        raise OpError(f"op {argv[0]} failed: {detail}")
     return proc.stdout
 
 

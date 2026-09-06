@@ -60,10 +60,21 @@ def test_voice_client_accepts_the_calls_the_transport_makes() -> None:
 
 
 def test_our_transport_builds_a_bot_against_the_installed_pycord() -> None:
-    """The whole assembly, short of connecting."""
+    """The whole assembly, short of connecting.
+
+    Inside a running loop, because discord.Bot() reaches for the current
+    event loop on construction and raises without one -- which is how the
+    real transport builds it, and how this test failed on the host while
+    passing on a developer machine.
+    """
+    import asyncio
+
     from orchestrator.voice.transport.discord import DiscordTransport
 
-    transport = DiscordTransport(token="not-a-real-token", channel_id=1)
-    bot = transport._build_bot()
+    async def build():
+        transport = DiscordTransport(token="not-a-real-token", channel_id=1)
+        return transport, transport._build_bot()
+
+    transport, bot = asyncio.run(build())
     assert bot is not None
     assert callable(transport._sink) and callable(transport._source)

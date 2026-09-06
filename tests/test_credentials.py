@@ -333,3 +333,88 @@ def test_op_errors_do_not_carry_stdout(tmp_path: Path) -> None:
             _run_op(["item", "list"])
     assert "leaked-value-here" not in str(exc.value)
     assert "auth required" in str(exc.value)
+
+
+# --- finding the 1Password token -------------------------------------------
+
+
+def test_the_environment_wins(tmp_path: Path) -> None:
+    from orchestrator.credentials import service_account_token
+
+    (tmp_path / ".op-token").write_text("from-the-file")
+    env = {"OP_SERVICE_ACCOUNT_TOKEN": "from-the-environment", "HOME": str(tmp_path)}
+    assert service_account_token(env) == "from-the-environment"
+
+
+def test_a_token_file_is_found_when_the_environment_is_clean(tmp_path: Path) -> None:
+    """The case that broke credential sharing: a systemd service starts
+    with a clean environment, so only bootstrap.sh knew where the token
+    lived and the voice agent reported it could not find the vault."""
+    from orchestrator.credentials import service_account_token
+
+    (tmp_path / ".op-token").write_text("token-from-home\n")
+    assert service_account_token({"HOME": str(tmp_path)}) == "token-from-home"
+
+
+def test_an_explicit_token_file_is_preferred(tmp_path: Path) -> None:
+    from orchestrator.credentials import service_account_token
+
+    (tmp_path / ".op-token").write_text("from-home")
+    explicit = tmp_path / "elsewhere"
+    explicit.write_text("from-op-token-file")
+    env = {"OP_TOKEN_FILE": str(explicit), "HOME": str(tmp_path)}
+    assert service_account_token(env) == "from-op-token-file"
+
+
+def test_surrounding_whitespace_is_stripped(tmp_path: Path) -> None:
+    """A file written by echo has a trailing newline, and a token with one
+    is not a token."""
+    from orchestrator.credentials import service_account_token
+
+    (tmp_path / ".op-token").write_text("  token-with-space  \n")
+    assert service_account_token({"HOME": str(tmp_path)}) == "token-with-space"
+
+
+def test_an_empty_token_file_is_ignored(tmp_path: Path) -> None:
+    from orchestrator.credentials import service_account_token
+
+    (tmp_path / ".op-token").write_text("\n")
+    assert service_account_token({"HOME": str(tmp_path)}) is None
+
+
+def test_the_search_order_matches_bootstrap(tmp_path: Path) -> None:
+    """One answer to "where does the token live", or the shell and the
+    Python disagree and only one of them works."""
+    from orchestrator.credentials import token_paths
+
+    bootstrap = (Path(__file__).resolve().parents[1] / "scripts" / "bootstrap.sh").read_text()
+    assert "OP_TOKEN_FILE" in bootstrap
+    assert "${HOME}/.op-token" in bootstrap
+
+    paths = [str(p) for p in token_paths({"OP_TOKEN_FILE": "/x/tok", "HOME": "/home/agent"})]
+    assert paths[0] == "/x/tok"
+    assert paths[1] == "/home/agent/.op-token"
+
+
+def test_a_missing_token_produces_an_actionable_error(monkeypatch) -> None:
+    """"not signed in" from a background service is misleading advice: the
+    problem is almost always that the token was never found."""
+    import subprocess
+
+    from orchestrator.credentials import OpError, _run_op
+
+    monkeypatch.delenv("OP_SERVICE_ACCOUNT_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "orchestrator.credentials.service_account_token", lambda *a, **k: None
+    )
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *a, **k: subprocess.CompletedProcess(
+            args=[], returncode=1, stdout="", stderr="You are not currently signed in."
+        ),
+    )
+    with pytest.raises(OpError) as exc:
+        _run_op(["item", "list"])
+    assert "no service account token was found" in str(exc.value)
+    assert ".op-token" in str(exc.value)

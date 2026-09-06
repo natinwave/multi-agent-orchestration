@@ -215,9 +215,17 @@ points at `root-setup.sh` for anything needing a change of owner.
 
 For a machine you are not sitting at, use a 1Password **service account**
 rather than `op signin` — the interactive sign-in expects the desktop app.
-Set `OP_SERVICE_ACCOUNT_TOKEN` and `op run` works headlessly. That token is
-itself a secret and has to live somewhere; a root-owned file sourced by the
-operator, or a systemd credential, is the usual answer.
+Put the token at `~/.op-token` (or point `OP_TOKEN_FILE` at it) and
+everything finds it: `bootstrap.sh`, the CLI, the MCP server and the voice
+bridge all look in the same places, in the same order.
+
+That mattered more than it sounds. Only `bootstrap.sh` knew where the token
+lived at first, and everything else inherited `op`'s credentials from its
+environment — which for a systemd service is empty. The symptom was a voice
+agent that would ask permission to share a credential, get it, and then
+report that it could not find the vault at all. The token is registered
+with the redactor too, since being read from a file put it beyond the reach
+of `scrub_env`.
 
 `--dangerously-skip-permissions` is used **inside the container and nowhere
 else**. Anything invoking `claude` on the bare host uses
@@ -524,7 +532,7 @@ about any of it:
 What *is* covered off-host, and is worth running before you push:
 
 ```sh
-.venv/bin/python -m pytest -q          # 529 tests
+.venv/bin/python -m pytest -q          # 536 tests
 ./scripts/check-no-secrets.sh
 docker compose -f docker/docker-compose.yml config     # schema only
 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \
