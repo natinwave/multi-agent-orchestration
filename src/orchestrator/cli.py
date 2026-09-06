@@ -57,9 +57,18 @@ def _fmt_jobs(result: dict) -> str:
 
 
 def _fmt_agents(result: dict) -> str:
-    return "\n".join(
-        f"{a['name']:<14} {a['type']:<12} {a['description']}" for a in result["agents"]
-    )
+    lines = []
+    for a in result["agents"]:
+        marks = []
+        if a.get("isolated"):
+            marks.append("own container per job")
+        if a.get("max_concurrent"):
+            marks.append(f"max {a['max_concurrent']}")
+        if a.get("credentials"):
+            marks.append("has: " + ", ".join(a["credentials"]))
+        suffix = f"  [{'; '.join(marks)}]" if marks else ""
+        lines.append(f"{a['name']:<14} {a['type']:<18} {a['description'][:70]}{suffix}")
+    return "\n".join(lines)
 
 
 def _fmt_repos(result: dict) -> str:
@@ -116,6 +125,10 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("list-agents", help="list configured agents")
     sub.add_parser("list-repos", help="list repos and the names you can call them")
 
+    sub.add_parser(
+        "sync-credentials",
+        help="give every profile the standing credentials it declares",
+    )
     sub.add_parser("list-credentials", help="what the vault is willing to share")
     sub.add_parser("list-grants", help="what each agent can currently reach")
 
@@ -169,6 +182,17 @@ def main(argv: list[str] | None = None) -> int:
         case "list-repos":
             result = sup.list_repos()
             text = _fmt_repos(result)
+        case "sync-credentials":
+            result = sup.sync_credentials()
+            lines = [
+                f"{g['agent']:<14} {g['credential']:<32} ${g['env_var']}"
+                for g in result["granted"]
+            ]
+            lines += [
+                f"FAILED {f['agent']:<8} {f['credential']:<32} {f['message']}"
+                for f in result["failed"]
+            ]
+            text = "\n".join(lines) or "no profile declares any credentials"
         case "list-credentials":
             result = sup.list_credentials()
             text = _fmt_error(result) if "error" in result else _fmt_credentials(result)
@@ -209,7 +233,9 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     print(json.dumps(result, indent=2) if args.json else text)
-    return 1 if "error" in result else 0
+    if "error" in result:
+        return 1
+    return 1 if result.get("failed") else 0
 
 
 if __name__ == "__main__":

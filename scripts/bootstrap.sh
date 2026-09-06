@@ -329,6 +329,21 @@ print(", ".join(l for l in labels if l))
 }
 secrets_step
 
+# --- 3b. standing credentials ----------------------------------------------
+# Profiles declare what they always hold; /run is a tmpfs, so this is also
+# what puts those back after a reboot.
+
+if [ -x "${VENV}/bin/python" ] && [ -r "${ORCH_SECRETS}/claude-code/oauth_token" ] \
+   || [ -r "${ORCH_SECRETS}/claude-code/anthropic_api_key" ]; then
+  if out="$("${HERE}/bin/orchestrate" sync-credentials 2>&1)"; then
+    count="$(printf '%s' "$out" | grep -c . || true)"
+    pass "profile credentials in place (${count})"
+  else
+    warn "some profile credentials could not be granted"
+    printf '%s\n' "$out" | sed 's/^/      /' | head -8
+  fi
+fi
+
 # --- 4. repositories -------------------------------------------------------
 # Clone if absent, fetch if present. Never a reset: a fetch cannot destroy
 # work sitting in a worktree.

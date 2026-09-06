@@ -202,6 +202,7 @@ PUBLIC = [
     "list_repos",
     "reap",
     "list_credentials",
+    "sync_credentials",
     "stop",
     "grant",
     "revoke",
@@ -681,3 +682,73 @@ def test_one_agents_jobs_do_not_limit_another(tmp_path: Path, slow_model: str) -
     assert "error" not in sup.ask("spare", "unaffected")
 
     sup.stop(busy)
+
+
+# --- standing credentials ---------------------------------------------------
+
+
+def test_a_profiles_declared_credentials_are_granted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, slow_model: str
+) -> None:
+    """Declared once in a profile rather than granted every session."""
+    def fake_op(argv):
+        if argv[:2] == ["item", "list"]:
+            return json.dumps([{"title": "Ledger DB Password"}])
+        return json.dumps(
+            {"fields": [{"label": "password", "type": "CONCEALED", "value": "pw-value"}]}
+        )
+
+    monkeypatch.setattr("orchestrator.credentials._run_op", fake_op)
+
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "agents.toml").write_text(
+        f'[agents.ledger]\ntype = "http_openai"\nbase_url = "{slow_model}"\n'
+        f'model = "m"\nneeds_repo = false\n'
+        f'secrets_dir = "{tmp_path / "secrets" / "ledger"}"\n'
+        f'credentials = ["Ledger DB Password"]\n'
+    )
+    (cfg / "repos.toml").write_text('[repos.main]\nurl = "https://h/o/m.git"\n')
+    (cfg / "orchestrator.toml").write_text(
+        f'[paths]\nroot = "{tmp_path / "srv"}"\n'
+        f'[credentials]\nsecrets_root = "{tmp_path / "secrets"}"\n'
+    )
+    sup = Supervisor.create(config=load(cfg, tmp_path / "srv"), environ={})
+
+    result = sup.sync_credentials()
+    assert result["failed"] == []
+    assert result["granted"][0]["agent"] == "ledger"
+    assert result["granted"][0]["env_var"] == "LEDGER_DB_PASSWORD"
+    assert (tmp_path / "secrets" / "ledger" / "ledger_db_password").read_text() == "pw-value"
+
+
+def test_syncing_reports_a_credential_that_is_not_in_the_vault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, slow_model: str
+) -> None:
+    """Naming it beats a profile that quietly has less than it says."""
+    monkeypatch.setattr(
+        "orchestrator.credentials._run_op", lambda argv: json.dumps([])
+    )
+    cfg = tmp_path / "config"
+    cfg.mkdir()
+    (cfg / "agents.toml").write_text(
+        f'[agents.ledger]\ntype = "http_openai"\nbase_url = "{slow_model}"\n'
+        f'model = "m"\nneeds_repo = false\ncredentials = ["Missing Item"]\n'
+    )
+    (cfg / "repos.toml").write_text('[repos.main]\nurl = "https://h/o/m.git"\n')
+    (cfg / "orchestrator.toml").write_text(
+        f'[paths]\nroot = "{tmp_path / "srv"}"\n'
+        f'[credentials]\nsecrets_root = "{tmp_path / "secrets"}"\n'
+    )
+    sup = Supervisor.create(config=load(cfg, tmp_path / "srv"), environ={})
+
+    result = sup.sync_credentials()
+    assert result["granted"] == []
+    assert result["failed"][0]["credential"] == "Missing Item"
+
+
+def test_list_agents_says_what_a_profile_holds(sup: Supervisor) -> None:
+    """So the voice agent can answer "what does Ledger have?" without a
+    second call, and without ever seeing a value."""
+    agent = sup.list_agents()["agents"][0]
+    assert "credentials" in agent and "isolated" in agent

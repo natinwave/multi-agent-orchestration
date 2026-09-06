@@ -392,6 +392,12 @@ class Supervisor:
     # -- listings -----------------------------------------------------------
 
     def list_agents(self) -> dict:
+        """The profiles available, and what each one carries.
+
+        The credential list is titles only, and it is here so the voice
+        agent can answer "what does Ledger have?" without a second call and
+        without ever seeing a value.
+        """
         return self._out(
             {
                 "agents": [
@@ -401,11 +407,42 @@ class Supervisor:
                         "description": a.description,
                         "default_repo": a.default_repo,
                         "needs_repo": a.needs_repo,
+                        "credentials": list(a.credentials),
+                        "isolated": a.isolation == "per_job",
+                        "max_concurrent": a.max_concurrent or None,
                     }
                     for a in self.config.agents.values()
                 ]
             }
         )
+
+    def sync_credentials(self) -> dict:
+        """Materialise every profile's standing credentials from the vault.
+
+        Declared once in a profile rather than granted every session. Run
+        by bootstrap, and again whenever a profile changes -- /run is a
+        tmpfs, so this is also what puts them back after a reboot.
+
+        Existing ad-hoc grants are left alone: this adds what profiles
+        declare, it does not prune what you handed over by hand.
+        """
+        store = self.config.credential_store()
+        granted, failed = [], []
+
+        for agent in self.config.agents.values():
+            for title in agent.credentials:
+                try:
+                    grant = store.grant(agent.name, title)
+                except CredentialError as exc:
+                    failed.append({"agent": agent.name, "credential": title,
+                                   "message": str(exc)})
+                    continue
+                granted.append(
+                    {"agent": agent.name, "credential": grant.title,
+                     "env_var": grant.env_var}
+                )
+
+        return self._out({"granted": granted, "failed": failed})
 
     def list_repos(self) -> dict:
         """The vocabulary the voice model can use when naming a repo."""

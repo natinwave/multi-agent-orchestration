@@ -1,0 +1,52 @@
+# A profile: one persistent identity, any number of instances.
+#
+# Copy this to /srv/orchestration/profiles/ledger.toml and edit. Profiles
+# live there rather than in the repository because they get personal fast
+# -- what an agent is for, which credentials it holds, which of your
+# projects it touches -- and none of that belongs in a git history.
+#
+# The filename is the name. This one is "ledger", and the voice agent will
+# hear it as a word: keep it speakable.
+
+# What it is for, written for the voice agent to choose on. This is the
+# text the model reads when deciding who gets a job, so say what the agent
+# is FOR rather than what it is.
+description = """
+Works on the provisioning ledger: its schema, its importers and its tests.
+Knows that codebase and nothing else. Give it a ledger task and leave it.
+"""
+
+# Start from the shipped coding agent -- its command, flags, timeouts and
+# narration contract -- and change only what differs.
+extends = "claude-code"
+
+# Its own image, built from a Dockerfile next to this file. Everything
+# Ledger needs is baked in, so a job costs a container start rather than
+# an install.
+image = "orchestration/ledger:latest"
+
+# One container per job. Two Ledger tasks at once get separate containers
+# and separate worktrees, so they cannot step on each other.
+isolation = "per_job"
+
+# Its own credential directory, so what Ledger holds is not what the
+# general coding agent holds.
+secrets_dir = "/run/orchestration/secrets/ledger"
+
+# What it always has, by vault item title. Materialised by
+# `orchestrate sync-credentials`, which bootstrap runs -- declared once
+# here rather than granted every session. Each becomes an environment
+# variable named after it: "Ledger DB Password" -> $LEDGER_DB_PASSWORD.
+# Ad-hoc grants still work on top for one-off needs.
+credentials = [
+  # "Ledger DB Password",
+  # "GitHub Agent Token",
+]
+
+# Which repository it works on unless told otherwise. Registered in
+# config/repos.toml.
+# default_repo = "ledger"
+needs_repo = true
+
+# How many Ledger jobs at once.
+max_concurrent = 3

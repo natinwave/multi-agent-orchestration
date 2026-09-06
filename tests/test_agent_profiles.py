@@ -226,3 +226,100 @@ def test_the_shipped_coding_agent_has_a_ceiling() -> None:
     """An enthusiastic afternoon should not put twenty agents on one
     desktop by accident."""
     assert load().agents["claude-code"].max_concurrent > 0
+
+
+# --- profiles from outside the repository -----------------------------------
+
+
+def test_a_profile_file_becomes_an_agent(tmp_path: Path) -> None:
+    """Profiles get personal fast -- what an agent is for, what it holds,
+    which projects it touches -- and none of that belongs in a git
+    history."""
+    root = tmp_path / "srv"
+    (root / "profiles").mkdir(parents=True)
+    (root / "profiles" / "ledger.toml").write_text(
+        'description = "works on the ledger"\n'
+        'extends = "base"\n'
+        'isolation = "per_job"\n'
+        'image = "orchestration/ledger:latest"\n'
+    )
+    cfg = load(write(tmp_path, BASE), root_override=root)
+    ledger = cfg.agents["ledger"]
+    assert ledger.description == "works on the ledger"
+    assert ledger.container == "orch-base"          # inherited from the repo
+    assert ledger.isolation == "per_job"
+
+
+def test_the_filename_is_the_name(tmp_path: Path) -> None:
+    root = tmp_path / "srv"
+    (root / "profiles").mkdir(parents=True)
+    (root / "profiles" / "vesper-local.toml").write_text('extends = "base"\n')
+    assert "vesper-local" in load(write(tmp_path, BASE), root_override=root).agents
+
+
+def test_a_profile_repeating_its_own_name_is_refused(tmp_path: Path) -> None:
+    """Two places to say who it is, is one place for them to disagree."""
+    root = tmp_path / "srv"
+    (root / "profiles").mkdir(parents=True)
+    (root / "profiles" / "ledger.toml").write_text('[agents.ledger]\nextends = "base"\n')
+    with pytest.raises(ConfigError, match="filename names it"):
+        load(write(tmp_path, BASE), root_override=root)
+
+
+def test_an_unspeakable_filename_is_refused(tmp_path: Path) -> None:
+    """A profile name is said out loud by the voice agent."""
+    root = tmp_path / "srv"
+    (root / "profiles").mkdir(parents=True)
+    (root / "profiles" / "Ledger V2!.toml").write_text('extends = "base"\n')
+    with pytest.raises(ConfigError, match="lowercase"):
+        load(write(tmp_path, BASE), root_override=root)
+
+
+def test_a_profile_overrides_a_shipped_agent_of_the_same_name(tmp_path: Path) -> None:
+    """Overriding one is a legitimate thing to want, and ignoring the
+    override silently would not be."""
+    root = tmp_path / "srv"
+    (root / "profiles").mkdir(parents=True)
+    (root / "profiles" / "base.toml").write_text(
+        'type = "container"\ncontainer = "mine"\ncommand = ["claude"]\n'
+    )
+    cfg = load(write(tmp_path, BASE), root_override=root)
+    assert cfg.agents["base"].container == "mine"
+
+
+def test_no_profiles_directory_is_fine(tmp_path: Path) -> None:
+    assert "base" in load(write(tmp_path, BASE), root_override=tmp_path / "empty").agents
+
+
+def test_the_shipped_example_profile_is_valid(tmp_path: Path) -> None:
+    """It is what people copy, so it has to load."""
+    import shutil
+
+    root = tmp_path / "srv"
+    (root / "profiles").mkdir(parents=True)
+    example = Path(__file__).resolve().parents[1] / "examples" / "profiles" / "ledger.toml"
+    shutil.copy(example, root / "profiles" / "ledger.toml")
+
+    ledger = load(root_override=root).agents["ledger"]
+    assert ledger.isolation == "per_job", "each instance should get its own container"
+    assert ledger.image and ledger.secrets_dir
+    assert len(ledger.description) > 60
+
+
+# --- standing credentials ---------------------------------------------------
+
+
+def test_a_profile_declares_what_it_always_holds(tmp_path: Path) -> None:
+    cfg = load(write(tmp_path, BASE + '''
+[agents.ledger]
+extends = "base"
+credentials = ["Ledger DB Password", "GitHub Agent Token"]
+'''))
+    assert cfg.agents["ledger"].credentials == ("Ledger DB Password", "GitHub Agent Token")
+
+
+def test_credentials_are_inherited_like_anything_else(tmp_path: Path) -> None:
+    cfg = load(write(tmp_path, BASE.replace(
+        "max_concurrent = 4", 'max_concurrent = 4\ncredentials = ["Shared Token"]'
+    ) + '[agents.child]\nextends = "base"\n'))
+    assert cfg.agents["child"].credentials == ("Shared Token",)

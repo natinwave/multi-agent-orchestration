@@ -284,13 +284,43 @@ now, end the job.
 
 ## Profiles and instances
 
-An agent in the registry is a **kind**: an image, a model, a system
-prompt, the credentials it may use. Any number of jobs run against one at
-the same time — each gets its own worktree and its own detached process,
-so five concurrent jobs of the same kind do not collide. That part is
-inherent to the design rather than a feature added later.
+A **profile** is a persistent identity: a name said out loud, a
+description, its own image, and a standing set of credentials. An
+**instance** is one job running as that profile, with its own container
+and its own git worktree, so two instances of the same profile never step
+on each other.
 
-Three things make it usable as a fleet:
+```
+/srv/orchestration/profiles/ledger.toml     ← the profile, outside git
+/srv/orchestration/profiles/ledger.Dockerfile
+        ↓
+ask("ledger", "…")   ask("ledger", "…")     ← two instances
+   own container         own container
+   own worktree          own worktree
+```
+
+**Profiles live outside the repository**, one TOML file each under
+`{root}/profiles/`, named by their filename. They get personal fast — what
+an agent is for, which credentials it holds, which of your projects it
+touches — and none of that belongs in a git history. A profile may
+`extends` anything in `config/agents.toml`, so the shipped definitions
+stay the base and yours stay yours. `examples/profiles/ledger.toml` is a
+worked one to copy, with a Dockerfile beside it.
+
+A profile declares what it always holds, by vault item title:
+
+```toml
+credentials = ["Ledger DB Password", "GitHub Agent Token"]
+```
+
+`orchestrate sync-credentials` materialises those into the profile's own
+secrets directory — declared once rather than granted every session, and
+run by bootstrap, which is also what puts them back after a reboot since
+`/run` is a tmpfs. Ad-hoc `grant()` still works on top for one-off needs.
+`list_agents()` reports the titles, so the voice agent can answer "what
+does Ledger have?" without a second call and without ever seeing a value.
+
+Three mechanics underneath:
 
 **`extends`** — a second kind is a few lines, not a copy:
 
@@ -660,7 +690,7 @@ about any of it:
 What *is* covered off-host, and is worth running before you push:
 
 ```sh
-.venv/bin/python -m pytest -q          # 619 tests
+.venv/bin/python -m pytest -q          # 632 tests
 ./scripts/check-no-secrets.sh
 docker compose -f docker/docker-compose.yml config     # schema only
 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \

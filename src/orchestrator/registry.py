@@ -80,6 +80,7 @@ class AmbiguousRepo(KeyError):
 #: names itself wins; this is what it gets for free.
 INHERITABLE = (
     "type", "description", "container", "image", "isolation", "max_concurrent",
+    "credentials",
     "command", "session_flags", "resume_flags", "system_prompt_flags",
     "secrets_dir", "base_url", "model", "api_key_file", "harness_arn",
     "region", "default_repo", "needs_repo", "timeout_seconds", "max_tokens",
@@ -103,6 +104,11 @@ class Agent:
     isolation: str = "shared"
     #: How many jobs of this kind may run at once. 0 means no limit.
     max_concurrent: int = 0
+    #: Vault items this profile always has, by title. Materialised into its
+    #: own secrets directory by `orchestrate sync-credentials`, so the
+    #: standing set is declared once rather than granted every session.
+    #: Ad-hoc grant() still works on top for one-off needs.
+    credentials: tuple[str, ...] = ()
     command: tuple[str, ...] = ()
     # How this particular CLI is told to start a session, resume one, and
     # take a system prompt. Config rather than code, because every agentic
@@ -260,6 +266,41 @@ class Config:
         raise UnknownRepo(query, sorted(self.repos))
 
 
+def load_profiles(profiles_dir: Path) -> dict:
+    """Read one agent per file from a directory outside the repository.
+
+    Profiles get personal fast -- what an agent is for, which credentials
+    it holds, which of your projects it touches -- and none of that belongs
+    in a git history. So they live under the runtime root instead, one
+    TOML file per profile, named after the file.
+
+    A profile may `extends` anything in config/agents.toml, so the shipped
+    definitions stay the base and yours stay yours.
+    """
+    if not profiles_dir.is_dir():
+        return {}
+
+    found: dict = {}
+    for path in sorted(profiles_dir.glob("*.toml")):
+        name = path.stem
+        if not re.fullmatch(r"[a-z][a-z0-9_-]*", name):
+            raise ConfigError(
+                f"{path}: a profile filename becomes an agent name, so it must be "
+                "lowercase letters, digits, dashes and underscores"
+            )
+        spec = _read_toml(path)
+        # One agent per file: a bare table, not [agents.x]. The filename
+        # says who it is, so repeating it inside would be a second place
+        # for the two to disagree.
+        if "agents" in spec:
+            raise ConfigError(
+                f"{path}: a profile file is one agent, written as bare keys. "
+                "Drop the [agents.x] header; the filename names it."
+            )
+        found[name] = spec
+    return found
+
+
 def _resolve_inheritance(raw: dict) -> dict:
     """Fold `extends` into each agent's own settings.
 
@@ -316,6 +357,17 @@ def load(config_dir: Path | None = None, root_override: Path | None = None) -> C
     repos_raw = _read_toml(config_dir / "repos.toml").get("repos", {})
     orch = _read_toml(config_dir / "orchestrator.toml")
 
+    # Personal profiles, from outside the repository. They win over a
+    # shipped agent of the same name -- overriding one is a legitimate
+    # thing to want, and silently ignoring the override would not be.
+    root_for_profiles = Path(
+        root_override
+        or os.environ.get(ROOT_ENV)
+        or orch.get("paths", {}).get("root", "/srv/orchestration")
+    )
+    profiles = load_profiles(root_for_profiles / "profiles")
+    agents_raw = {**agents_raw, **profiles}
+
     if not agents_raw:
         raise ConfigError(f"{config_dir / 'agents.toml'}: no agents defined")
 
@@ -350,7 +402,10 @@ def load(config_dir: Path | None = None, root_override: Path | None = None) -> C
                 f"not {spec['isolation']!r}"
             )
         spec = dict(spec)
-        for list_field in ("command", "session_flags", "resume_flags", "system_prompt_flags"):
+        for list_field in (
+            "command", "session_flags", "resume_flags", "system_prompt_flags",
+            "credentials",
+        ):
             if list_field in spec:
                 spec[list_field] = tuple(spec[list_field])
         agents[name] = Agent(name=name, **spec)
