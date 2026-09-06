@@ -47,6 +47,7 @@ OUTPUT_AUDIO_DONE = "response.output_audio.done"
 OUTPUT_TRANSCRIPT_DELTA = "response.output_audio_transcript.delta"
 SPEECH_STARTED = "input_audio_buffer.speech_started"
 SPEECH_STOPPED = "input_audio_buffer.speech_stopped"
+RESPONSE_CREATED = "response.created"
 RESPONSE_DONE = "response.done"
 ERROR = "error"
 

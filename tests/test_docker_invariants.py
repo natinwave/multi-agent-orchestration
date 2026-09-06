@@ -220,3 +220,51 @@ def test_agents_can_reach_services_on_the_host() -> None:
     """The replacement for running containers: an agent can talk to a
     database or dev server the host is running, by name."""
     assert "host.docker.internal:host-gateway" in COMPOSE_CODE
+
+
+# --- looking at web pages ---------------------------------------------------
+
+
+def test_a_browser_is_on_the_path() -> None:
+    """An agent checking whether a browser exists looks for a binary. With
+    Playwright's chromium buried several directories deep it finds nothing
+    and concludes, reasonably, that there is not one -- which is exactly
+    what happened."""
+    assert "/usr/local/bin/chromium" in DOCKERFILE
+    assert "chromium --version" in DOCKERFILE, "verify the symlink at build time"
+
+
+def test_playwright_is_installed_for_both_languages() -> None:
+    """A Python project reaching for a browser will pip install playwright,
+    and without the package here that pulls one whose expected browser
+    build is missing -- which it then downloads mid-task."""
+    assert "npm install -g playwright" in DOCKERFILE
+    assert "pip install --no-cache-dir playwright" in DOCKERFILE
+    assert "python3 -m playwright install chromium" in DOCKERFILE
+
+
+@pytest.mark.parametrize("helper", ["screenshot", "page-text"])
+def test_the_browser_helpers_ship_and_are_executable(helper: str) -> None:
+    path = DOCKER / "bin" / helper
+    assert path.is_file()
+    assert "/usr/local/bin/" in DOCKERFILE
+    import ast
+
+    ast.parse(path.read_text())
+
+
+@pytest.mark.parametrize("helper", ["screenshot", "page-text"])
+def test_the_helpers_disable_the_chromium_sandbox(helper: str) -> None:
+    """Chromium's sandbox needs privileges this container drops, and the
+    failure without it names everything except sandboxes."""
+    assert "--no-sandbox" in (DOCKER / "bin" / helper).read_text()
+
+
+def test_the_prompt_tells_agents_the_browser_exists_and_how_to_use_it() -> None:
+    """It said 'a real browser via Playwright' and gave no command, so an
+    agent had to discover the tooling. One of them concluded there was no
+    browser at all."""
+    prompt = (DOCKER / "agent-prompt.md").read_text()
+    assert "page-text" in prompt and "screenshot" in prompt
+    assert "--no-sandbox" in prompt
+    assert "Do not install a browser" in prompt

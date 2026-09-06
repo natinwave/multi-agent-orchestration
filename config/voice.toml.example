@@ -43,6 +43,13 @@ discord_channel_id = 0
 model = "gpt-realtime-2.1"
 voice = "marin"
 
+# Mention it when a job finishes, fails, or needs an answer, rather than
+# waiting to be asked. Only those transitions -- progress for its own sake
+# is not worth interrupting a conversation for -- and never while the
+# model is mid-sentence.
+announce_job_changes = true
+announce_interval_seconds = 8
+
 # Appended to the base instructions, never merged over them. Put anything
 # site-specific here: which repos matter, how you refer to things.
 extra_instructions = """

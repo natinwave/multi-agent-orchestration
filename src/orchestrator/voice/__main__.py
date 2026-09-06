@@ -69,6 +69,7 @@ async def run_sip(server, voice_cfg: dict, config, api_key: str) -> int:
     from .prompt import build_instructions
     from .sip import CallScreen, SipListener, accept_payload
     from .tools import realtime_tools
+    from .watcher import JobWatcher
 
     allowed = tuple(voice_cfg.get("allowed_callers", ()))
     if not allowed:
@@ -108,8 +109,22 @@ async def run_sip(server, voice_cfg: dict, config, api_key: str) -> int:
             on_audio=_ignore_audio,
             call_id=call_id,
         )
+        watcher_task = None
         try:
             await session.connect()
+
+            # Watch the jobs for the length of the call, so a job that
+            # finishes while you are still talking gets mentioned rather
+            # than waiting to be asked about.
+            if voice_cfg.get("announce_job_changes", True):
+                watcher = JobWatcher(
+                    server=server,
+                    announce=session.announce,
+                    is_busy=lambda: session.speaking,
+                    interval=float(voice_cfg.get("announce_interval_seconds", 8)),
+                )
+                watcher_task = asyncio.create_task(watcher.run())
+
             await session.run()
         except Exception as exc:  # noqa: BLE001 - one call must not end the service
             # Hanging up drops the socket without a close frame, which is
@@ -120,6 +135,8 @@ async def run_sip(server, voice_cfg: dict, config, api_key: str) -> int:
             else:
                 log.exception("call %s ended badly", call_id)
         finally:
+            if watcher_task is not None:
+                watcher_task.cancel()
             await session.close()
             log.info("call %s ended", call_id)
 

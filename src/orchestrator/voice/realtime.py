@@ -52,6 +52,7 @@ class RealtimeSession:
     _ws: Any = field(default=None, repr=False)
     _dispatcher: ToolDispatcher | None = field(default=None, repr=False)
     _transcript: list[str] = field(default_factory=list, repr=False)
+    _speaking: bool = field(default=False, repr=False)
 
     # -- connection ---------------------------------------------------------
 
@@ -140,18 +141,23 @@ class RealtimeSession:
         """
         kind = event.get("type")
 
-        if kind == protocol.OUTPUT_AUDIO_DELTA:
+        if kind == protocol.RESPONSE_CREATED:
+            self._speaking = True
+
+        elif kind == protocol.OUTPUT_AUDIO_DELTA:
             delta = event.get("delta")
             if delta:
                 await self.on_audio(base64.b64decode(delta))
 
         elif kind == protocol.SPEECH_STARTED:
+            self._speaking = False
             # Barge-in. The user talking over the model means they already
             # have what they needed, so stop generating and drop whatever
             # is queued -- otherwise the reply keeps playing over them.
             await self._cancel_response()
 
         elif kind == protocol.RESPONSE_DONE:
+            self._speaking = False
             await self._handle_response_done(event)
 
         elif kind == protocol.OUTPUT_TRANSCRIPT_DELTA:
@@ -205,6 +211,35 @@ class RealtimeSession:
 
         # The model is waiting on these results to say anything at all.
         await self._send({"type": protocol.RESPONSE_CREATE})
+
+    async def announce(self, text: str) -> None:
+        """Have the model say something nobody asked for.
+
+        The socket stays open for the whole call, so it can be pushed as
+        well as pulled: this puts a note into the conversation and asks for
+        a spoken response. Marked as an update so the model relays it
+        rather than treating it as something the caller said.
+        """
+        await self._send(
+            {
+                "type": protocol.CONVERSATION_ITEM_CREATE,
+                "item": {
+                    "type": "message",
+                    "role": "user",
+                    "content": [{"type": "input_text", "text": f"[update] {text}"}],
+                },
+            }
+        )
+        await self._send({"type": protocol.RESPONSE_CREATE})
+
+    @property
+    def speaking(self) -> bool:
+        """Whether the model is mid-reply.
+
+        Interrupting yourself is worse than being a moment late, so the
+        watcher holds an announcement until this is False.
+        """
+        return self._speaking
 
     @property
     def transcript(self) -> str:

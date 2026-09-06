@@ -62,9 +62,24 @@ RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" \
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
 RUN npm install -g playwright@latest \
     && playwright install --with-deps chromium \
-    && chmod -R a+rX /opt/playwright \
     && npm cache clean --force \
     && rm -rf /var/lib/apt/lists/*
+
+# The Python package too, not only the Node one. An agent reaching for a
+# browser in a Python project will `pip install playwright`, and without
+# this that pulls a package whose expected browser build is not here --
+# which it then tries to download mid-task, slowly, and often fails.
+RUN pip install --no-cache-dir playwright \
+    && python3 -m playwright install chromium \
+    && chmod -R a+rX /opt/playwright
+
+# Put a browser on PATH. Playwright hides its chromium several directories
+# deep, so an agent checking whether a browser exists finds nothing and
+# concludes, reasonably, that there is not one.
+RUN ln -sf "$(find /opt/playwright -name chrome -type f -path '*chrome-linux*' | head -1)" \
+        /usr/local/bin/chromium \
+    && ln -sf /usr/local/bin/chromium /usr/local/bin/google-chrome \
+    && chromium --version
 
 # ubuntu:24.04 ships a stock `ubuntu` user already sitting on uid 1000, which
 # is exactly the uid we usually want. Remove it before creating ours.
@@ -82,8 +97,11 @@ RUN if getent passwd "${AGENT_UID}" >/dev/null; then \
 COPY agent-prompt.md /etc/orchestration/agent-prompt.md
 
 # `narrate` is the only way a job talks to the voice front-end.
-COPY bin/narrate /usr/local/bin/narrate
-RUN chmod 0755 /usr/local/bin/narrate /etc/orchestration/agent-prompt.md
+# `screenshot` and `page-text` make looking at a web page one command
+# rather than a research project.
+COPY bin/narrate bin/screenshot bin/page-text /usr/local/bin/
+RUN chmod 0755 /usr/local/bin/narrate /usr/local/bin/screenshot \
+        /usr/local/bin/page-text /etc/orchestration/agent-prompt.md
 
 # Settings are baked in, not mounted, so a job never waits on config that
 # might not be there. Written to the image; the /home/agent volume in

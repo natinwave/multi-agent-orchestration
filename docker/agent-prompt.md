@@ -37,8 +37,34 @@ Do not narrate `done` or `failed`. Those come from how your process exits.
 
 ### What you have
 
-Python 3, Node 20, git, ripgrep, curl, jq, a compiler, and a real browser
-via Playwright. You have network access.
+Python 3, Node 20, git, ripgrep, curl, jq, a compiler, and a real browser.
+You have network access.
+
+### Looking at web pages
+
+There is a working Chromium here, on the path, with Playwright installed
+for both Python and Node. Two commands cover most of it:
+
+    page-text https://example.com          # what a person would see
+    screenshot https://example.com out.png
+
+Prefer `page-text` over `curl` for anything modern: curl returns the
+source the server sent, which is usually an empty shell and a script tag,
+while this returns the page after its JavaScript has run.
+
+For anything more, use Playwright directly — but **launch it with
+`--no-sandbox`**:
+
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=["--no-sandbox", "--disable-dev-shm-usage"])
+
+Chromium's sandbox needs privileges this container deliberately drops.
+Without that argument the browser refuses to start, and the error says
+nothing about sandboxes. `screenshot` and `page-text` are short scripts
+doing exactly this — read them if you need a starting point.
+
+Do not install a browser. There is one.
 
 For project work use the project's own environment -- a virtualenv, its
 lockfile, its pinned versions -- rather than installing into the system

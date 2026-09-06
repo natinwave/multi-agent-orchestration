@@ -1,0 +1,52 @@
+#!/usr/bin/env python3
+"""Print the readable text of a page, after its JavaScript has run.
+
+    page-text https://example.com
+    page-text https://example.com --html      # the rendered DOM instead
+
+This is usually what you want rather than curl. curl returns the source a
+server sent, which for most modern sites is an empty shell and a script
+tag; this returns what a person would actually see.
+
+Text by default because that is what is worth reading, and because a
+rendered DOM is enormous.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+
+BROWSER_ARGS = ["--no-sandbox", "--disable-dev-shm-usage"]
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(prog="page-text", description=__doc__.splitlines()[0])
+    parser.add_argument("url")
+    parser.add_argument("--html", action="store_true", help="rendered DOM instead of text")
+    parser.add_argument("--selector", help="only this part of the page")
+    parser.add_argument("--wait", type=float, default=1.0, help="seconds to settle after load")
+    args = parser.parse_args()
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        print("playwright is not installed in this image", file=sys.stderr)
+        return 1
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(args=BROWSER_ARGS)
+        page = browser.new_page()
+        try:
+            page.goto(args.url, wait_until="load", timeout=45_000)
+            if args.wait:
+                page.wait_for_timeout(args.wait * 1000)
+            target = page.locator(args.selector) if args.selector else page.locator("body")
+            print(target.inner_html() if args.html else target.inner_text())
+        finally:
+            browser.close()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

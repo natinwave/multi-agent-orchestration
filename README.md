@@ -280,9 +280,25 @@ is baked into the image.
 ### What an agent has
 
 Python 3 with venv and pip, Node 20, git, ripgrep, curl, jq, a compiler,
-and Chromium via Playwright. Network access. Browsers install to a shared
-`/opt/playwright` so the Python and Node packages find the same binaries
-instead of downloading one copy each.
+and a real browser. Network access.
+
+Chromium is **on the path**, with Playwright installed for both Python and
+Node. Two commands cover most web work:
+
+```sh
+page-text https://example.com          # what a person would see
+screenshot https://example.com out.png
+```
+
+Each of those details was a lesson. Playwright hides its chromium several
+directories deep, so an agent checking for a browser binary found nothing
+and concluded there was none. Only the Node package was installed, so a
+Python project's `pip install playwright` pulled one whose browser build
+was missing and tried to download it mid-task. And Chromium's sandbox
+needs privileges this container deliberately drops, so it must be launched
+with `--no-sandbox` — an argument whose absence produces an error
+mentioning everything except sandboxes. The prompt now says all three, and
+the two helpers are short scripts an agent can read as worked examples.
 
 Ubuntu marks the system Python externally-managed, so `PIP_BREAK_SYSTEM_PACKAGES`
 is set: in a disposable container there is nothing to protect, and the PEP
@@ -401,6 +417,27 @@ parked job), `list_repos` (the names a repo answers to), and
 `list_credentials` / `grant` / `revoke` / `list_grants` for delegation. A
 front-end that only uses the first four works fine.
 
+### It tells you when something changes
+
+A voice agent that only reports when asked is worse than a text log: you
+have to remember to ask, which is the thing delegating was meant to avoid.
+
+The realtime session is a socket held open for the length of the call, so
+it can be pushed as well as pulled. A watcher polls the jobs while you
+talk and, when one finishes, fails or gets stuck, hands the model a
+sentence and asks it to speak.
+
+Restraint is the design constraint, because being interrupted by a machine
+is worse than not being told. It announces only transitions that change
+what you might do next — never `queued` to `running`, which is progress
+rather than news. It never speaks while the model is mid-sentence, holding
+the update until there is a gap. Several changes at once become one
+sentence rather than three interruptions. And the first reading of a call
+is silent, or every call would open with a recital of everything that ever
+ran.
+
+Turn it off with `announce_job_changes = false`.
+
 `grant`'s description tells the client model, in as many words, to read
 back what it is about to grant and wait for you to agree. That docstring is
 the only thing between a spoken "sure" and a live secret reaching a process
@@ -487,7 +524,7 @@ about any of it:
 What *is* covered off-host, and is worth running before you push:
 
 ```sh
-.venv/bin/python -m pytest -q          # 505 tests
+.venv/bin/python -m pytest -q          # 529 tests
 ./scripts/check-no-secrets.sh
 docker compose -f docker/docker-compose.yml config     # schema only
 docker run --rm -v "$PWD:/mnt" -w /mnt koalaman/shellcheck:stable \
