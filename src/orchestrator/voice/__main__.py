@@ -178,10 +178,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--verbose", "-v", action="store_true")
     args = parser.parse_args(argv)
 
+    # --verbose turns up OUR logging, not everything's. Setting the root
+    # logger to DEBUG makes websockets log every frame, which buries the
+    # handful of lines that actually explain a call -- and puts raw frame
+    # contents in the journal, outside the redaction chokepoint every
+    # other output path goes through.
     logging.basicConfig(
-        level=logging.DEBUG if args.verbose else logging.INFO,
+        level=logging.INFO,
         format="%(asctime)s %(levelname)-7s %(name)s: %(message)s",
     )
+    if args.verbose:
+        logging.getLogger("orchestrator").setLevel(logging.DEBUG)
+        for noisy in ("websockets", "asyncio", "discord", "mcp", "urllib3"):
+            logging.getLogger(noisy).setLevel(logging.WARNING)
 
     try:
         config = load()

@@ -47,6 +47,9 @@ StartLimitBurst=0
 [Service]
 Type=simple
 WorkingDirectory=%REPO%
+# Add --verbose to see every event crossing the wire while diagnosing a
+# call. It raises only this project's logging, not the websocket
+# library's, so the journal stays readable and raw frames stay out of it.
 ExecStart=%REPO%/bin/orchestrate-voice --transport sip
 
 # Credentials live on a tmpfs that is wiped every boot and refilled by

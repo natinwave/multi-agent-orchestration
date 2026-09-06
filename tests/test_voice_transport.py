@@ -174,3 +174,21 @@ def test_the_session_records_when_configuration_is_accepted() -> None:
     assert not session.configured.is_set()
     asyncio.run(session.handle_event({"type": protocol.SESSION_UPDATED}))
     assert session.configured.is_set()
+
+
+def test_verbose_raises_our_logging_not_everything() -> None:
+    """Root-level DEBUG makes websockets log every frame, which buries the
+    handful of lines that explain a call and puts raw frame contents in the
+    journal, outside the redaction chokepoint. --verbose has to be
+    targeted or it cannot be left on in a service."""
+    from pathlib import Path
+
+    source = (
+        Path(__file__).resolve().parents[1]
+        / "src" / "orchestrator" / "voice" / "__main__.py"
+    ).read_text()
+
+    assert 'logging.getLogger("orchestrator").setLevel(logging.DEBUG)' in source
+    assert "level=logging.DEBUG" not in source, "root logger must not go to DEBUG"
+    for noisy in ("websockets", "asyncio"):
+        assert noisy in source, f"{noisy} should be pinned down explicitly"
